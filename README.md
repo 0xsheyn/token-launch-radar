@@ -38,12 +38,10 @@ at `/input/snapshot.json`, scores every pre-token protocol, and writes:
   (pre-token board, live-token, set aside, model & calibration, method and
   backtest); sortable
   and filterable board with a sensitivity range bar, an airdrop slice per
-  $1,000 and a FARM / THIN / SKIP verdict per row; a centred detail modal
-  for every protocol with a TVL slider, the value breakdown, the
-  sensitivity range, farm
-  economics, the costed seven-step farm plan, the net by deposit and drop,
-  and the nearest traded peers; and the model with its sector offsets and
-  the variant comparison.
+  $1,000 and a FARM / THIN / SKIP verdict per row; a full-page detail view
+  for every protocol — the value breakdown, the nearest traded peers, the
+  costed seven-step farm plan and the net by deposit and drop; and the model
+  with its sector offsets and the variant comparison.
 - `screenshots/` — three screenshots of the dashboard: the board, a protocol
   detail view, and a filtered view.
 - `dossier.json` — built with `buildDossier` from `vendor/makefun-board.ts`
@@ -133,11 +131,11 @@ Sensitivity changes nothing about the ranking. The board sorts on implied
 value exactly as before, every implied value is the same number it was, and
 the range is reported alongside so a reader can carry the model's own
 error instead of a single number. The dashboard shows the range too: a
-range bar on every table row (P10–P90, dot at the implied value) and a
-Sensitivity section in the protocol detail modal (P10–P90 and P25–P75) —
-labelled as the model's leave-one-out error, not a confidence interval.
-The TVL slider in the modal still moves the TVL ±20% through the fitted
-curve; it is a what-if on the input, not the sensitivity range.
+range bar on every table row (P10–P90, dot at the implied value), the detail
+page's first stat card (P25–P90) and the value breakdown's implied-value line
+(P10–P90) — labelled as the model's leave-one-out error, not a confidence
+interval. There is no TVL slider: the range is the sensitivity, not a what-if
+on the input.
 
 ## Backtest
 
@@ -203,9 +201,10 @@ weekly qualifying action, $2 of gas a week, 10 minutes a week), Risk (hold of
 in the position, no gas and no extra minutes), Claim (check the protocol's own
 points page and claim only from the link it publishes, no fee, 10 minutes),
 and Exit (a farm log, 5 minutes). Every step states what it costs and how
-long it takes, in words and in numbers: the detail modal shows them as a
-table with a totals row, and the totals are the farm economics' gas and
-hands-on time — $17–$25 of gas and 35 + 10 minutes per week of the hold,
+long it takes, in words and in numbers: the detail page shows them as a
+table, and the footer under it carries the slice, the fees, the forgone
+yield, the net, the work and the net per hour — $17–$25 of gas and 35 + 10
+minutes per week of the hold,
 summed from the same steps, not a second accounting. The setup is 15 minutes
 split across Verify and Mint: 5 to check, 10 to place the position.
 
@@ -218,11 +217,11 @@ the deposit. At $1,000 with no drop the net is the economics' own net
 exactly. A bigger deposit does not rescue a bad farm: the slice grows with
 the deposit, but so does the forgone yield.
 
-The detail modal also names the three live tokens nearest the row by TVL —
+The detail page also names the three live tokens nearest the row by TVL —
 same category first — with their market caps and mcap/TVL ratios, so the
 reader can see which live tokens price a protocol like this one. When the
 row's own category has fewer than three live tokens, the rest come from
-across categories, and the modal says so.
+across categories, and the page says so.
 
 ## Files
 
@@ -233,7 +232,7 @@ vendor/makefun-board.ts  make.fun's dossier library, copied unchanged
 dashboard/index.html     the page shell
 dashboard/app.css        the theme (dark blue, lime accent, no network)
 dashboard/app.js         hero, scatter, stats, verdicts, tabs, filters,
-                         board, histogram, detail modal, offsets, backtest
+                         board, histogram, detail page, offsets, backtest
 screenshots/              1-board.png, 2-detail.png, 3-filtered.png
 LICENSE                  MIT
 README.md                this file

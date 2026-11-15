@@ -7,10 +7,10 @@ show the starter dashboard, not this one, so they were NOT copied in.
 ## What to capture (exactly 3, PNG, 1440 x 900, at most 512 KiB)
 
 1. `1-board.png` — the board: hero, stats and the ranked
-   table, no modal open.
+   table, no detail open.
 2. `2-detail.png` — a protocol detail view: click the rank-1 row so the
-   detail modal opens in the centre, then capture the page with the modal
-   visible.
+   full-page detail view opens, then capture the page (the detail fills the
+   page below the header and tabs).
 3. `3-filtered.png` — a filtered view: type a search (e.g. `Lending`) or pick
    a category in the Category filter so the board shows only matching rows,
    then capture.
@@ -20,8 +20,8 @@ show the starter dashboard, not this one, so they were NOT copied in.
 With Playwright (headless Chromium) from `~/workspace/makefun/token-radar-01/shot/`
 (`shoot.mjs`; `node_modules` lives there): open
 `file://<entry>/out/dashboard/index.html` at 1440x900, wait for the rows,
-shoot 1-board; click the first row, wait for the modal, shoot 2-detail;
-close it, fill the search, shoot 3-filtered. Zero console errors on every
+shoot 1-board; click the first row, wait for the detail page, shoot 2-detail;
+click Back to the board, fill the search, shoot 3-filtered. Zero console errors on every
 shot. Then re-run the entry for real:
 `MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json`
 from `entry/`. It copies `dashboard/` and `screenshots/` into `out/`,

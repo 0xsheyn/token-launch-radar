@@ -224,47 +224,51 @@ tbody tr[data-selected="true"] { background: var(--lime-soft); }
 .button { min-height: 36px; padding: 0 var(--step-4); border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface); }
 .button.primary { background: var(--lime); border-color: var(--lime); color: #0a1526; font-weight: 700; }
 
-/* The detail modal: centred on the page, dimmed paper behind it, never a side drawer. */
-.detail {
-  position: fixed; inset: 0; margin: auto; width: min(780px, 94vw); max-height: 88vh;
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: 14px;
-  padding: var(--step-5) var(--step-6); overflow-y: auto; z-index: 10;
-}
-.detail::backdrop { background: rgba(3, 7, 18, 0.65); }
-.detail-head { display: flex; align-items: start; justify-content: space-between; gap: var(--step-4); }
-.detail-head > div { min-width: 0; }
-.detail-head .sub { overflow-wrap: anywhere; }
-.close { flex: none; min-width: 32px; min-height: 32px; padding: 0 var(--step-3); white-space: nowrap; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface); }
-.detail h2 { font-family: var(--font-serif); font-size: 30px; margin-top: var(--step-1); }
-.detail .sub { margin-top: var(--step-1); }
-.detail-section { margin-top: var(--step-5); padding-top: var(--step-4); border-top: 1px solid var(--border); }
-.detail-section h3 { margin-bottom: var(--step-3); }
-.big-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--step-4); margin-top: var(--step-4); padding-top: var(--step-4); border-top: 1px solid var(--border); }
-.big-label { font-size: 11px; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
-.big-value { font-family: var(--font-serif); font-size: 26px; font-weight: 700; line-height: 1.2; margin-top: 2px; }
-.slider-row { display: flex; align-items: center; gap: var(--step-4); }
-.slider-row input[type="range"] { flex: 1; accent-color: var(--accent); }
-.slider-out { font-family: var(--font-num); font-size: 13px; white-space: nowrap; }
-.equation { display: grid; gap: var(--step-2); font-family: var(--font-num); font-size: 13px; }
-.equation div { display: flex; justify-content: space-between; gap: var(--step-3); }
-.equation span { color: var(--muted); }
-.equation div.total { border-top: 1px solid var(--border); padding-top: var(--step-2); }
-.equation div.total b { font-size: 14px; }
-.econ-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--step-3); background: var(--paper-deep); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--step-3) var(--step-4); }
-.econ-label { font-size: 10px; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
-.econ-strip b { font-size: 14px; }
-.ticket { display: flex; flex-wrap: wrap; gap: var(--step-2) var(--step-5); background: var(--paper-deep); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--step-3) var(--step-4); font-size: 14px; }
+/* The detail page: a full page under the header and tabs, not a dialog. Back button and
+   breadcrumb on top, the name, four stat cards, then two columns — the value breakdown
+   and the traded peers left, the farm plan and the net at bigger deposits right. */
+.detail-page { margin-top: var(--step-4); display: grid; gap: var(--step-4); align-content: start; }
+.back-btn { justify-self: start; }
+.crumb { font-size: 11px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
+.detail-title-row { display: flex; align-items: center; gap: var(--step-3); flex-wrap: wrap; }
+.detail-title-row h1 { font-size: 34px; }
+.detail-sub { max-width: 90ch; color: var(--ink-soft); }
+.detail-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--step-4); }
+.dstat { padding: var(--step-4); display: grid; gap: 2px; align-content: start; }
+.stat-net { font-family: var(--font-num); font-size: 16px; font-weight: 700; margin-top: var(--step-2); }
+.detail-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--step-4); align-items: start; }
+.detail-col { display: grid; gap: var(--step-4); align-content: start; }
+.dpanel { padding: var(--step-4) var(--step-5); display: grid; gap: var(--step-3); align-content: start; }
+.dpanel h2 { margin-bottom: var(--step-1); }
+.build-row { display: flex; justify-content: space-between; gap: var(--step-3); padding: var(--step-2) 0; }
+.build-row + .build-row { border-top: 1px solid var(--border); }
+.build-row.total { border-top: 2px solid var(--border-strong); }
+.build-row.total b { font-size: 15px; }
+.build-label { font-weight: 600; }
+.build-note { font-family: var(--font-num); font-size: 12px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.build-foot { margin-top: var(--step-1); }
+.peer-plot svg { display: block; width: 100%; height: auto; }
+.peer-plot .grid { stroke: var(--border); stroke-width: 1; }
+.peer-plot .tick { font-family: var(--font-num); font-size: 9px; fill: var(--muted); }
+.peer-plot .dot-live { fill: #8b9bb4; opacity: 0.9; }
+.peer-plot .dot-here { fill: var(--lime); stroke: var(--ink); stroke-width: 1.5; }
+.peer-plot .bench-line { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 3; }
+.peer-cap { font-size: 11px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
+.plan-foot { font-size: 13px; color: var(--ink-soft); border-top: 1px solid var(--border); padding-top: var(--step-3); }
+.plan-foot b { font-family: var(--font-num); }
 
-/* Tables inside the detail modal: the costed plan, the net sensitivity, the peers. Rows are
-   facts, not links: no pointer, no hover wash. */
+/* Tables on the detail page: the costed plan, the net sensitivity, the peers. Rows are
+   facts, not links: no pointer, no hover wash. The highlighted net cell is the $1,000
+   deposit at a 10% drop. */
 .detail-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .detail-table th, .detail-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 .detail-table thead th { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
 .detail-table tbody tr { cursor: default; }
 .detail-table tbody tr:hover { background: transparent; }
-.detail-table tfoot td { border-top: 2px solid var(--border-strong); border-bottom: 0; font-weight: 700; }
-.plan-step { font-weight: 700; white-space: nowrap; }
-.plan-action { color: var(--ink-soft); }
+.detail-table td.hl { background: var(--lime-soft); box-shadow: inset 0 0 0 1px var(--lime); }
+.plan-step { color: var(--ink-soft); }
+.plan-step b { color: var(--ink); }
+
 
 @media (max-width: 1100px) {
   .hero { grid-template-columns: 1fr; }
@@ -273,8 +277,8 @@ tbody tr[data-selected="true"] { background: var(--lime-soft); }
   .stat { border-top: 1px solid var(--border); }
   .stat:nth-child(-n+3) { border-top: 0; }
   .model-grid { grid-template-columns: 1fr; }
-  .big-nums { grid-template-columns: repeat(2, 1fr); }
-  .econ-strip { grid-template-columns: repeat(3, 1fr); }
+  .detail-stats { grid-template-columns: repeat(2, 1fr); }
+  .detail-cols { grid-template-columns: 1fr; }
 }
 @media (max-width: 900px) {
   .shell { padding: var(--step-4); }
