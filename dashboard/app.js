@@ -352,7 +352,8 @@
       tab('board', 'Pre-token board ' + DATA.board_size),
       tab('live', 'Token already trades ' + DATA.live_size),
       tab('setaside', 'Set aside ' + SET_ASIDE_TOTAL),
-      tab('model', 'Model & calibration')
+      tab('model', 'Model & calibration'),
+      tab('backtest', 'Method and backtest')
     );
   }
 
@@ -603,7 +604,7 @@
       ),
       el('section', { class: 'panel model-col' },
         el('h2', { text: 'What this model does not do' }),
-        el('p', { text: 'This is one snapshot, ' + DATA.as_of + '. The model is fitted and read on that same snapshot: there is no time split and no out-of-sample error to quote, and this page quotes none. Any figure that looked like a validation would be invented, so the honest statement is the absence of one — the implied values are the snapshot\u2019s own sector multiples applied to its own TVLs, not a backtest.' }),
+        el('p', { text: 'The model is fitted on this snapshot\u2019s own live tokens, and the Method and backtest tab tests it against them — blind, leave-one-out, and on a time split by listing date. But read the Limits there first: the ground truth is today\u2019s market cap, not the price at launch, and the split is by listing date, not a replay of history. The implied values are the snapshot\u2019s own sector multiples applied to its own TVLs; the backtest says how far those multiples miss when they are asked to predict a token that already trades — and on this snapshot, they miss by about as much as one global number does.' }),
         el('h3', { text: 'How the verdict is earned' }),
         el('p', { text: 'FARM: the slice beats gas and the forgone 4% T-bill yield — the net is positive after every cost. THIN: the slice beats the gas but not the forgone yield — worth it only if the fees fall or the slice grows. SKIP: the slice does not even beat the gas.' }),
         el('p', { class: 'sub', text: 'On this board: ' + VERDICTS.FARM + ' FARM \u00b7 ' + VERDICTS.THIN + ' THIN \u00b7 ' + VERDICTS.SKIP + ' SKIP. The counts follow the gas above, not a quota: the top rows by implied value are often SKIP, because a $1,000 deposit is a thin slice of a very large TVL.' }),
@@ -614,6 +615,130 @@
           el('li', { text: 'Forgone: the 4% T-bill yield on the $1,000 over the 30 days the plan holds it — $3.29.' }),
           el('li', { text: 'Hands-on: the plan\u2019s own step times added up — 5 minutes to set up the wallet, 15 to place the position, 10 minutes a week for the weekly action over the hold, 10 to check the rewards page, 5 to log it.' }),
           el('li', { text: 'Sensitivity: the implied value under a TVL shock of \u00b120% and a growth-multiplier shock of \u00b10.25, sector, maturity and chain held. A wide range means the launch value is fragile.' })
+        )
+      )
+    );
+  }
+
+  // The backtest tab: how the model is tested, the two result tables, the
+  // out-of-sample scatter, and the limits. Every number is read from
+  // data.js (computed at run time from the snapshot), never typed in here —
+  // including the verdict, which is computed, not asserted: on this snapshot
+  // radar-2 does not beat the flat benchmark on the median miss, and the tab
+  // says so.
+  function backtestTab() {
+    var V = DATA.validation;
+    if (!V) {
+      return el('div', { class: 'panel' }, el('div', { class: 'empty' },
+        el('h2', { text: 'No backtest in this data.js' }),
+        el('p', { text: 'Regenerate the entry to compute the validation.' })
+      ));
+    }
+    function miss(x) { return 'x' + x.toFixed(2); }
+    function pct1(x) { return x.toFixed(1) + '%'; }
+    function metricRow(label, m, other) {
+      return el('tr', null,
+        el('td', { text: label }),
+        el('td', { class: 'num', text: String(m.n) }),
+        el('td', { class: 'num' + (m.median_miss < other.median_miss ? ' better' : ''), text: miss(m.median_miss) }),
+        el('td', { class: 'num' + (m.within_2x_pct > other.within_2x_pct ? ' better' : ''), text: pct1(m.within_2x_pct) }),
+        el('td', { class: 'num' + (m.within_3x_pct > other.within_3x_pct ? ' better' : ''), text: pct1(m.within_3x_pct) }),
+        el('td', { class: 'num' + (m.band_50x < other.band_50x ? ' better' : ''), text: miss(m.band_50x) }),
+        el('td', { class: 'num' + (m.band_80x < other.band_80x ? ' better' : ''), text: miss(m.band_80x) })
+      );
+    }
+    function resultTable(title, note, a, b) {
+      return el('section', { class: 'panel bt-panel' },
+        el('h2', { text: title }),
+        el('p', { class: 'sub', text: note }),
+        el('div', { class: 'table-wrap' },
+          el('table', { class: 'bench' },
+            el('thead', null, el('tr', null,
+              el('th', { scope: 'col', text: 'Set' }),
+              el('th', { scope: 'col', text: 'n' }),
+              el('th', { scope: 'col', text: 'Median miss' }),
+              el('th', { scope: 'col', text: 'Within 2x' }),
+              el('th', { scope: 'col', text: 'Within 3x' }),
+              el('th', { scope: 'col', text: 'Band 50%' }),
+              el('th', { scope: 'col', text: 'Band 80%' }))),
+            el('tbody', null, metricRow('Radar-2', a, b), metricRow('Flat benchmark', b, a))
+          )
+        )
+      );
+    }
+    var looVerdict = V.loo.model.median_miss < V.loo.flat.median_miss ? 'beats' : 'does not beat';
+    var tsVerdict = V.timesplit.model.median_miss < V.timesplit.flat.median_miss ? 'beats' : 'does not beat';
+
+    // The out-of-sample scatter: the 51 test tokens, actual market cap
+    // against the prediction, on log-log axes, with the diagonal and the 3x
+    // band. A line log10(y) = log10(x) + c, clipped to the plot square.
+    function oosScatter() {
+      var pts = V.timesplit.points.filter(function (p) { return p.actual_usd > 0 && p.predicted_usd > 0; });
+      var all = [];
+      pts.forEach(function (p) { all.push(p.actual_usd); all.push(p.predicted_usd); });
+      var lo = Math.floor(Math.log10(Math.min.apply(null, all)));
+      var hi = Math.ceil(Math.log10(Math.max.apply(null, all)));
+      var W = 560, H = 340, L = 46, R = 30, T = 8, B = 26;
+      function px(v) { return L + ((Math.log10(v) - lo) / (hi - lo)) * (W - L - R); }
+      function py(v) { return T + (1 - (Math.log10(v) - lo) / (hi - lo)) * (H - T - B); }
+      function clipLine(c) {
+        var top = Math.pow(10, hi), bot = Math.pow(10, lo);
+        var x1 = Math.pow(10, lo), y1 = Math.pow(10, lo + c);
+        var x2 = Math.pow(10, hi), y2 = Math.pow(10, hi + c);
+        if (y1 > top) { x1 = Math.pow(10, hi - c); y1 = top; }
+        if (y1 < bot) { x1 = Math.pow(10, lo - c); y1 = bot; }
+        if (y2 > top) { x2 = Math.pow(10, hi - c); y2 = top; }
+        if (y2 < bot) { x2 = Math.pow(10, lo - c); y2 = bot; }
+        if (x1 >= x2) return null;
+        return [x1, y1, x2, y2];
+      }
+      var parts = ['<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Out of sample: actual against predicted market cap, log-log">'];
+      var k;
+      for (k = lo; k <= hi; k++) {
+        var gx = px(Math.pow(10, k));
+        parts.push('<line class="grid" x1="' + gx.toFixed(1) + '" y1="' + T + '" x2="' + gx.toFixed(1) + '" y2="' + (H - B) + '"/>');
+        parts.push('<text class="tick" x="' + gx.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + fmtUsd(Math.pow(10, k)) + '</text>');
+        var gy = py(Math.pow(10, k));
+        parts.push('<line class="grid" x1="' + L + '" y1="' + gy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + gy.toFixed(1) + '"/>');
+        parts.push('<text class="tick" x="' + (L - 6) + '" y="' + (gy + 4).toFixed(1) + '" text-anchor="end">' + fmtUsd(Math.pow(10, k)) + '</text>');
+      }
+      var band = clipLine(Math.log10(3)), band2 = clipLine(-Math.log10(3));
+      if (band) parts.push('<line class="band-line" x1="' + px(band[0]).toFixed(1) + '" y1="' + py(band[1]).toFixed(1) + '" x2="' + px(band[2]).toFixed(1) + '" y2="' + py(band[3]).toFixed(1) + '"/>');
+      if (band2) parts.push('<line class="band-line" x1="' + px(band2[0]).toFixed(1) + '" y1="' + py(band2[1]).toFixed(1) + '" x2="' + px(band2[2]).toFixed(1) + '" y2="' + py(band2[3]).toFixed(1) + '"/>');
+      parts.push('<line class="diag" x1="' + px(Math.pow(10, lo)).toFixed(1) + '" y1="' + py(Math.pow(10, lo)).toFixed(1) + '" x2="' + px(Math.pow(10, hi)).toFixed(1) + '" y2="' + py(Math.pow(10, hi)).toFixed(1) + '"/>');
+      pts.forEach(function (p) {
+        parts.push('<circle class="dot" cx="' + px(p.actual_usd).toFixed(1) + '" cy="' + py(p.predicted_usd).toFixed(1) + '" r="3"><title>' + esc(p.name) + ': actual ' + fmtUsd(p.actual_usd) + ', predicted ' + fmtUsd(p.predicted_usd) + '</title></circle>');
+      });
+      parts.push('</svg>');
+      return el('div', { html: parts.join('') });
+    }
+
+    return el('div', { class: 'backtest' },
+      el('section', { class: 'panel bt-panel' },
+        el('h2', { text: 'How the model is tested' }),
+        el('p', { text: 'Radar-2 is fitted on this snapshot\u2019s live tokens: the sector benchmarks are the medians of the live tokens\u2019 market-cap-to-TVL ratios. The backtest asks whether those benchmarks predict a token\u2019s market cap at all — the same function that scores the board, pointed at tokens that already trade.' }),
+        el('p', { text: 'Leave-one-out (blind): all ' + V.live_n + ' live tokens, each predicted with the sector benchmarks recomputed without it — no token prices itself. The flat benchmark is the same test with one number instead of a model: the global median market-cap-to-TVL ratio times the token\u2019s TVL.' }),
+        el('p', { text: 'Time-split: the benchmarks are fitted on the ' + V.timesplit.fit_n + ' live tokens listed before ' + V.split_date + ' and tested on the ' + V.timesplit.test_n + ' listed in 2024 or later. The ' + V.timesplit.excluded_n + ' live tokens with no listing date cannot be placed on either side and are excluded from the split.' }),
+        el('p', { text: 'Ground truth is the market cap today, from the snapshot — not the price at launch, which no snapshot carries. The split is by listing date, not a replay of history. A miss is max(predicted / actual, actual / predicted): a miss of 3 means three times too high or three times too low. The band is the factor that covers a share of the misses: the 50% band is the median miss, the 80% band the 80th percentile.' }),
+        el('p', null, el('b', { text: 'On the median miss, radar-2 ' + looVerdict + ' the flat benchmark leave-one-out (' + miss(V.loo.model.median_miss) + ' vs ' + miss(V.loo.flat.median_miss) + ') and ' + tsVerdict + ' it on the time split (' + miss(V.timesplit.model.median_miss) + ' vs ' + miss(V.timesplit.flat.median_miss) + '). ' }),
+          'The sector multiples and the growth, maturity and chain factors do not add predictive power over one global number on this snapshot — the table shows it, so the board is read as a ranking of the sector multiples, not as a prediction that has earned its error bars.')
+      ),
+      resultTable('Leave-one-out (blind)', 'All ' + V.loo.n + ' live tokens. Each predicted with the benchmarks recomputed without it.', V.loo.model, V.loo.flat),
+      resultTable('Time-split', 'Benchmarks fitted on the ' + V.timesplit.fit_n + ' tokens listed before ' + V.split_date + '; tested on the ' + V.timesplit.test_n + ' listed in 2024 or later.', V.timesplit.model, V.timesplit.flat),
+      el('section', { class: 'panel bt-panel oos-card' },
+        el('h2', { text: 'Out of sample: the ' + V.timesplit.test_n + ' test tokens' }),
+        oosScatter(),
+        el('p', { class: 'bt-note', text: 'Each dot is one test token: its market cap today against the prediction, fitted on pre-2024 listings only. Dots above the diagonal are over-predicted. The dashed lines are 3x either way; ' + V.timesplit.model.within_3x_pct.toFixed(1) + '% of the test set falls inside them.' })
+      ),
+      el('section', { class: 'panel bt-panel' },
+        el('h2', { text: 'Limits' }),
+        el('ul', { class: 'assumptions' },
+          el('li', { text: 'One day of data: the snapshot is ' + DATA.as_of + '. A model fitted on one day cannot say how the next day\u2019s listings will price.' }),
+          el('li', { text: 'Ground truth is today\u2019s market cap. A token\u2019s launch price is not in the snapshot, so the backtest tests prediction of today\u2019s value, not of the launch.' }),
+          el('li', { text: 'Small samples: ' + V.live_n + ' tokens leave-one-out, ' + V.timesplit.fit_n + ' fitted and ' + V.timesplit.test_n + ' tested in the split. One large token moving changes the medians.' }),
+          el('li', { text: V.timesplit.excluded_n + ' live tokens carry no listing date and are excluded from the time split.' }),
+          el('li', { text: 'The sector benchmarks for the test tokens come from the fit set only — a test token\u2019s own category may have fewer than three fit tokens and fall back to the global benchmark.' }),
+          el('li', { text: 'Read the band, not the point: half the predictions land within ' + miss(V.timesplit.model.band_50x) + ' of the truth on the time split, and four in five within ' + miss(V.timesplit.model.band_80x) + '.' })
         )
       )
     );
@@ -757,6 +882,9 @@
     } else if (state.tab === 'setaside') {
       shell.appendChild(tabBar());
       shell.appendChild(setAsideTab());
+    } else if (state.tab === 'backtest') {
+      shell.appendChild(tabBar());
+      shell.appendChild(backtestTab());
     } else {
       shell.appendChild(tabBar());
       shell.appendChild(modelTab());

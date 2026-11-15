@@ -226,6 +226,7 @@ export interface RadarData {
   set_aside: SetAsideGroup[];
   benchmarks: SectorBenchmark[];
   global_benchmark: number;
+  validation: ModelValidation;
   rows: RadarRow[];
   live: LiveRow[];
 }
@@ -262,10 +263,11 @@ export const MIN_SECTOR_LIVE = 3;
  * category with fewer than three live tokens takes the global median: one live token's ratio
  * must not price a whole sector. Deterministic: the same snapshot always gives the same table.
  */
-export function computeBenchmarks(snapshot: Snapshot, model: ModelConstants = MODEL): { global: number; byCategory: SectorBenchmark[] } {
+export function computeBenchmarks(snapshot: Snapshot, model: ModelConstants = MODEL, only?: (p: SnapshotProtocol) => boolean): { global: number; byCategory: SectorBenchmark[] } {
   const allRatios: number[] = [];
   const byCategory = new Map<string, number[]>();
   for (const p of snapshot.protocols) {
+    if (only !== undefined && !only(p)) continue;
     if (p.mcap_usd === null || p.mcap_usd <= 0 || p.tvl_usd <= 0) continue;
     const ratio = p.mcap_usd / p.tvl_usd;
     allRatios.push(ratio);
@@ -836,6 +838,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     set_aside: setAsideGroups(snapshot, board, live),
     benchmarks: benchmarks.byCategory,
     global_benchmark: benchmarks.global,
+    validation: validateModel(snapshot, model),
     rows: board.map((r) => ({ ...radarRow(r), watchlist: snapshot.watchlist.includes(r.slug) })),
     live,
   };
@@ -885,7 +888,143 @@ export function parseSnapshot(text: string): Snapshot {
   };
 }
 
-/** Why a board is not one the gate will take, or null: coverage, ranks, order, one shared implied value, and farm steps. */
+// ---------------------------------------------------------------------------
+// Backtest: does radar-2 predict a token's market cap?
+// The model is fitted on the snapshot's own live tokens, so it can be tested
+// against them: a live token's market cap is the ground truth, and the model
+// predicts it from the token's TVL, sector, growth, age and chains — the same
+// function that scores the board. Two tests, both blind in the sense that the
+// tested token never prices itself:
+//   leave-one-out: every live token in turn, predicted with the sector
+//     benchmarks recomputed without it (the same median-shrink-clamp rule,
+//     the same prior weight, the same three-live-token floor).
+//   time-split: the benchmarks are fitted on the live tokens listed before
+//     2024-01-01 and tested on the ones listed in 2024 or later — the curve
+//     is fitted on the past and read on the future, as far as one snapshot
+//     allows. Tokens with no listing date cannot be placed on either side
+//     and are excluded from the split, and the count says so.
+// The flat benchmark is the same test with one number instead of a model:
+// the global median market-cap-to-TVL ratio times the token's TVL. It is the
+// model to beat, and when the model does not beat it the table says so.
+// A miss is max(pred/actual, actual/pred): a miss of 3 means the prediction
+// is three times too high or three times too low. The band is the factor
+// that covers a share of the misses: the 50% band is the median miss, the
+// 80% band the 80th percentile of the misses (nearest rank). The ground
+// truth is the market cap TODAY, from the snapshot — not the price at
+// launch, which no snapshot carries. That is the test's honest limit, and
+// the dashboard states it.
+// ---------------------------------------------------------------------------
+
+/** A protocol the backtest can score: it trades, so its market cap is the ground truth. */
+function isLiveTest(p: SnapshotProtocol): boolean {
+  return p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0;
+}
+
+/** The first day of the test half of the time split: tokens listed on or after it are tested. */
+export const TIMESPLIT_DATE = '2024-01-01';
+
+/** How far a prediction is from the truth, either way: 1 is exact, 3 is three times off. */
+export function missOf(predicted: number, actual: number): number {
+  return Math.max(predicted / actual, actual / predicted);
+}
+
+/** One test's numbers: how many, how far off, and how often inside a band. */
+export interface BacktestMetrics {
+  n: number;
+  median_miss: number;
+  within_2x_pct: number;
+  within_3x_pct: number;
+  band_50x: number;
+  band_80x: number;
+}
+
+/** One out-of-sample point: a test token's actual market cap against its prediction. */
+export interface BacktestPoint {
+  slug: string;
+  name: string;
+  tvl_usd: number;
+  actual_usd: number;
+  predicted_usd: number;
+}
+
+/** Everything the backtest tab shows, computed from the snapshot at run time. */
+export interface ModelValidation {
+  live_n: number;
+  listed_n: number;
+  no_date_n: number;
+  split_date: string;
+  loo: { n: number; model: BacktestMetrics; flat: BacktestMetrics };
+  timesplit: { fit_n: number; test_n: number; excluded_n: number; model: BacktestMetrics; flat: BacktestMetrics; points: BacktestPoint[] };
+}
+
+/** One test's numbers from its misses: the median, the shares inside 2x and 3x, and the bands. */
+function summarizeMisses(misses: number[]): BacktestMetrics {
+  const sorted = [...misses].sort((a, b) => a - b);
+  const n = sorted.length;
+  const median = medianOf(sorted) ?? 0;
+  const within = (x: number): number => (n === 0 ? 0 : Math.round((sorted.filter((m) => m <= x).length / n) * 1000) / 10);
+  const band80 = n === 0 ? 0 : sorted[Math.min(n - 1, Math.ceil(0.8 * n) - 1)]!;
+  return {
+    n,
+    median_miss: Math.round(median * 100) / 100,
+    within_2x_pct: within(2),
+    within_3x_pct: within(3),
+    band_50x: Math.round(median * 100) / 100,
+    band_80x: Math.round(band80 * 100) / 100,
+  };
+}
+
+/**
+ * The backtest, from the snapshot alone: leave-one-out over every live token
+ * and a time split fitted on the pre-2024 listings and tested on the 2024+
+ * listings, each against the flat benchmark on the same tokens. Nothing here
+ * changes the board: the board is scored once, from the whole snapshot, and
+ * this only asks how far that same scoring misses when it is asked to
+ * predict a token that already trades.
+ */
+export function validateModel(snapshot: Snapshot, model: ModelConstants = MODEL): ModelValidation {
+  const live = snapshot.protocols.filter(isLiveTest);
+  const listed = live.filter((p) => p.listed_at !== null);
+  const noDate = live.length - listed.length;
+
+  // Leave-one-out: each live token predicted with the benchmarks recomputed without it.
+  const looModel: number[] = [];
+  const looFlat: number[] = [];
+  for (const p of live) {
+    const bench = computeBenchmarks(snapshot, model, (q) => q.slug !== p.slug);
+    const pred = impliedValue(p, snapshot.as_of, model, bench).implied;
+    looModel.push(missOf(pred, p.mcap_usd!));
+    looFlat.push(missOf(bench.global * p.tvl_usd, p.mcap_usd!));
+  }
+
+  // Time-split: benchmarks from the pre-2024 listings only, tested on the 2024+ listings.
+  const fitSlugs = new Set(listed.filter((p) => p.listed_at! < TIMESPLIT_DATE).map((p) => p.slug));
+  const test = listed.filter((p) => p.listed_at! >= TIMESPLIT_DATE);
+  const bench = computeBenchmarks(snapshot, model, (q) => fitSlugs.has(q.slug));
+  const tsModel: number[] = [];
+  const tsFlat: number[] = [];
+  const points: BacktestPoint[] = [];
+  for (const p of test) {
+    const pred = impliedValue(p, snapshot.as_of, model, bench).implied;
+    tsModel.push(missOf(pred, p.mcap_usd!));
+    tsFlat.push(missOf(bench.global * p.tvl_usd, p.mcap_usd!));
+    points.push({ slug: p.slug, name: p.name, tvl_usd: p.tvl_usd, actual_usd: p.mcap_usd!, predicted_usd: pred });
+  }
+  points.sort((a, b) => b.actual_usd - a.actual_usd);
+
+  return {
+    live_n: live.length,
+    listed_n: listed.length,
+    no_date_n: noDate,
+    split_date: TIMESPLIT_DATE,
+    loo: { n: live.length, model: summarizeMisses(looModel), flat: summarizeMisses(looFlat) },
+    timesplit: { fit_n: fitSlugs.size, test_n: test.length, excluded_n: noDate, model: summarizeMisses(tsModel), flat: summarizeMisses(tsFlat), points },
+  };
+}
+
+/**
+ * Why a board is not one the gate will take, or null: coverage, ranks, order, one shared implied value, and farm steps.
+ */
 export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null {
   const slugs = new Set(board.map((r) => r.slug));
   const missing = snapshot.watchlist.filter((s) => !slugs.has(s));

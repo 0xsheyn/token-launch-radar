@@ -30,8 +30,9 @@ at `/input/snapshot.json`, scores every pre-token protocol, and writes:
 - `data.js` — the same board in compact form for the dashboard.
 - `dashboard/` — a static page (no network, no framework): dark-blue
   editorial theme with a lime accent; hero with a log-log scatter of TVL
-  against implied value; a six-stat strip; top-5 cards; four tabs
-  (pre-token board, live-token, set aside, model & calibration); sortable
+  against implied value; a six-stat strip; top-5 cards; five tabs
+  (pre-token board, live-token, set aside, model & calibration, method and
+  backtest); sortable
   and filterable board with a sensitivity range bar, an airdrop slice per
   $1,000 and a FARM / THIN / SKIP verdict per row; a centred detail modal
   for every protocol with a TVL slider, the value breakdown, farm
@@ -114,6 +115,27 @@ range bar on every table row and a Sensitivity section in the protocol
 detail modal, labelled as the TVL ±20% and growth ±0.25 shocks — not a
 confidence interval.
 
+## Backtest
+
+The dashboard's Method and backtest tab tests radar-2 against the
+snapshot's own live tokens, computed at run time — nothing here is typed
+in by hand. A miss is max(predicted / actual, actual / predicted).
+
+- **Leave-one-out (blind):** all 128 live tokens, each predicted with the
+  sector benchmarks recomputed without it. Radar-2: median miss x5.15,
+  22.7% within 2x, 32.8% within 3x. Flat benchmark (global median
+  mcap/TVL x TVL): x5.07, 28.1%, 35.2%.
+- **Time-split:** benchmarks fitted on the 44 live tokens listed before
+  2024-01-01, tested on the 51 listed in 2024 or later; 33 live tokens
+  carry no listing date and are excluded. Radar-2: median miss x5.46,
+  27.5% within 2x, 35.3% within 3x. Flat: x5.20, 25.5%, 35.3%.
+
+On the median miss, radar-2 does not beat the flat benchmark on either
+test. The sector multiples and the growth, maturity and chain factors do
+not add predictive power over one global number on this snapshot, and the
+dashboard says so. Ground truth is the market cap today, not the price
+at launch, which no snapshot carries.
+
 ## Farm verdicts
 
 Every row carries a verdict on its farm economics at a $1,000 deposit,
@@ -155,7 +177,8 @@ vendor/makefun-board.ts  make.fun's dossier library, copied unchanged
 dashboard/index.html     the page shell
 dashboard/app.css        the theme (dark blue, lime accent, no network)
 dashboard/app.js         hero, scatter, stats, verdicts, tabs, filters,
-                         histogram, board, detail modal, benchmarks
+                         histogram, board, detail modal, benchmarks,
+                         backtest
 screenshots/              1-board.png, 2-detail.png, 3-filtered.png
 LICENSE                  MIT
 README.md                this file
