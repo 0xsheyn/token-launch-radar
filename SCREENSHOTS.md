@@ -6,7 +6,7 @@ show the starter dashboard, not this one, so they were NOT copied in.
 
 ## What to capture (exactly 3, PNG, 1440 x 900, at most 512 KiB)
 
-1. `1-board.png` — the board: hero, stats, top-5 cards and the ranked
+1. `1-board.png` — the board: hero, stats and the ranked
    table, no modal open.
 2. `2-detail.png` — a protocol detail view: click the rank-1 row so the
    detail modal opens in the centre, then capture the page with the modal

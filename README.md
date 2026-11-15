@@ -34,7 +34,7 @@ at `/input/snapshot.json`, scores every pre-token protocol, and writes:
   editorial theme with a lime accent; hero with a log-log scatter of TVL
   against implied value and the fitted size curve, and one honest sentence
   of backtest (leave-one-out and time-split median miss, model and flat);
-  a six-stat strip; top-5 cards; five tabs
+  a six-stat strip; five tabs
   (pre-token board, live-token, set aside, model & calibration, method and
   backtest); sortable
   and filterable board with a sensitivity range bar, an airdrop slice per
@@ -233,7 +233,7 @@ vendor/makefun-board.ts  make.fun's dossier library, copied unchanged
 dashboard/index.html     the page shell
 dashboard/app.css        the theme (dark blue, lime accent, no network)
 dashboard/app.js         hero, scatter, stats, verdicts, tabs, filters,
-                         histogram, board, detail modal, offsets, backtest
+                         board, histogram, detail modal, offsets, backtest
 screenshots/              1-board.png, 2-detail.png, 3-filtered.png
 LICENSE                  MIT
 README.md                this file

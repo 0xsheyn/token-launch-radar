@@ -100,19 +100,6 @@ a { color: var(--accent); }
 .stat-value { font-family: var(--font-serif); font-size: 30px; font-weight: 700; line-height: 1.15; margin-top: 2px; }
 .stat-sub { font-size: 12px; color: var(--muted); }
 
-/* Top-five cards: a row of five, each a small dossier. */
-.top-cards { margin-top: var(--step-5); display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--step-3); }
-.top-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel); padding: var(--step-4); cursor: pointer; display: grid; gap: 2px; align-content: start; }
-.top-card:hover { border-color: var(--accent); }
-.top-card-rank { font-size: 11px; letter-spacing: 0.1em; color: var(--muted); }
-.top-card-cat { font-size: 11px; letter-spacing: 0.08em; color: var(--accent); font-weight: 700; }
-.top-card-name { font-family: var(--font-serif); font-size: 18px; font-weight: 700; line-height: 1.2; }
-.top-card-sub { font-size: 12px; color: var(--muted); }
-.top-card-value { font-family: var(--font-serif); font-size: 26px; font-weight: 700; margin-top: var(--step-2); }
-.top-card-mult { font-family: var(--font-num); font-size: 12px; color: var(--muted); }
-.top-card-ticket { font-size: 12px; color: var(--muted); margin-top: var(--step-2); }
-.top-card-verdict { display: flex; align-items: center; gap: var(--step-2); margin-top: var(--step-2); font-size: 12px; }
-
 /* Verdict tags: FARM lime, THIN amber, SKIP red. */
 .verdict { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; }
 .verdict.farm { background: var(--lime-soft); color: var(--accent); border: 1px solid var(--lime-mid); }
@@ -124,19 +111,24 @@ a { color: var(--accent); }
 .tabbar button { min-height: 32px; padding: 0 var(--step-4); border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-weight: 600; font-size: 13px; white-space: nowrap; }
 .tabbar button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 
-/* Filter bar: search, four dropdowns, then the pills and the count. */
-.controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--step-3); padding: var(--step-4) 0 var(--step-2); }
-.field { display: grid; gap: var(--step-1); }
+/* Filter bar: search, four dropdowns and the Show pills share one line;
+   their bottoms line up with the inputs. The count lives with the table. */
+.controls { display: flex; flex-wrap: nowrap; align-items: end; gap: var(--step-3); padding: var(--step-4) 0 var(--step-2); }
+.field { display: grid; gap: var(--step-1); min-width: 0; }
+.field-search { flex: 1 1 120px; }
 .field label { color: var(--muted); font-size: 12px; }
 .field input[type="search"], .field select {
   min-height: 36px; padding: 0 var(--step-3); border: 1px solid var(--border-strong); border-radius: var(--radius-control);
-  background: var(--surface); min-width: 170px;
+  background: var(--surface);
 }
-.field input[type="search"] { min-width: 250px; }
-.pills { display: flex; align-items: center; gap: var(--step-2); padding-bottom: var(--step-3); flex-wrap: wrap; }
-.pill { min-height: 30px; padding: 0 var(--step-3); border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); font-size: 13px; font-weight: 600; }
+.field input[type="search"] { min-width: 0; width: 100%; }
+.field select { width: 170px; }
+.field-wide select { width: 200px; }
+.pills { display: flex; align-items: center; gap: var(--step-2); }
+.pill { min-height: 36px; padding: 0 var(--step-3); border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); font-size: 13px; font-weight: 600; }
 .pill.active { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+.table-meta { display: flex; justify-content: flex-end; padding: var(--step-3) var(--step-4) 0; }
 
 /* Panels, tables, the live note. */
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel); overflow: hidden; }
@@ -280,7 +272,6 @@ tbody tr[data-selected="true"] { background: var(--lime-soft); }
   .stat:nth-child(4) { border-left: 0; padding-left: 0; }
   .stat { border-top: 1px solid var(--border); }
   .stat:nth-child(-n+3) { border-top: 0; }
-  .top-cards { grid-template-columns: repeat(2, 1fr); }
   .model-grid { grid-template-columns: 1fr; }
   .big-nums { grid-template-columns: repeat(2, 1fr); }
   .econ-strip { grid-template-columns: repeat(3, 1fr); }
@@ -290,7 +281,9 @@ tbody tr[data-selected="true"] { background: var(--lime-soft); }
   h1 { font-size: 32px; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .stat { border-left: 0; padding-left: 0; }
-  .top-cards { grid-template-columns: 1fr; }
+  .controls { flex-wrap: wrap; }
+  .field-search { flex-basis: 100%; }
+  .field select { width: 100%; }
   .field input { min-width: 0; width: 100%; }
   .field input[type="search"] { min-width: 0; }
 }

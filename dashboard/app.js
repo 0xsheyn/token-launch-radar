@@ -286,25 +286,6 @@
     );
   }
 
-  function topCards() {
-    var cards = DATA.rows.slice(0, 5).map(function (r) {
-      var e = r.economics;
-      return el('article', { class: 'top-card', tabindex: '0', role: 'button', 'aria-label': 'Detail for ' + r.name,
-        onclick: function () { openDetail(r.slug); },
-        onkeydown: function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openDetail(r.slug); } } },
-        el('div', { class: 'top-card-rank', text: 'NO. ' + r.rank }),
-        el('div', { class: 'top-card-cat', text: (r.category || 'OTHER').toUpperCase() }),
-        el('div', { class: 'top-card-name', text: r.name }),
-        el('div', { class: 'top-card-sub', text: (r.category || 'Other') + ' \u00b7 ' + (r.chains || []).slice(0, 2).join(', ') + ((r.chains || []).length > 2 ? ' +' + ((r.chains || []).length - 2) : '') }),
-        el('div', { class: 'top-card-value', text: fmtUsd(r.implied_value_usd) }),
-        el('div', { class: 'top-card-mult', text: fmtMult(r.implied_value_usd / r.tvl_usd) + ' \u00b7 ' + fmtUsd(r.tvl_usd) + ' TVL' }),
-        el('div', { class: 'top-card-ticket', text: '$' + (e ? e.capital_usd : capitalFor(r)) + ' ticket \u00b7 ' + (e ? e.hold_days : holdDaysFor(r.age_days)) + '-day hold \u00b7 ' + (r.plan ? r.plan.length : 7) + ' steps' }),
-        e ? el('div', { class: 'top-card-verdict' }, verdictTag(e.verdict), el('span', { class: e.net_usd >= 0 ? 'pos' : 'neg', text: ' ' + fmtSigned(e.net_per_hour_usd) + ' net of all costs' })) : null
-      );
-    });
-    return el('section', { class: 'top-cards', 'aria-label': 'Top five protocols' }, cards);
-  }
-
   function tabBar() {
     function tab(id, label) {
       return el('button', { type: 'button', 'aria-pressed': state.tab === id ? 'true' : 'false', text: label,
@@ -324,14 +305,14 @@
     var chains = Array.from(new Set(DATA.rows.reduce(function (acc, r) { return acc.concat(r.chains || []); }, []))).sort();
     var search = el('input', { type: 'search', id: 'q', placeholder: 'Search protocol, category, chain', value: state.q, 'aria-label': 'Search the board' });
     search.addEventListener('input', function () { state.q = search.value; writeHash(); render(); });
-    function makeSelect(id, label, options, current, onchange) {
+    function makeSelect(id, label, options, current, onchange, wide) {
       var s = el('select', { id: id, 'aria-label': label },
         options.map(function (o) { return el('option', { value: o[0], text: o[1], selected: o[0] === current ? 'selected' : null }); })
       );
       s.addEventListener('change', function () { onchange(s.value); writeHash(); render(); });
-      return el('div', { class: 'field' }, el('label', { for: id, text: label }), s);
+      return el('div', { class: 'field' + (wide ? ' field-wide' : '') }, el('label', { for: id, text: label }), s);
     }
-    var catSel = makeSelect('category', 'Category', [['all', 'Every category']].concat(categories.map(function (c) { return [c, c]; })), state.category, function (v) { state.category = v; });
+    var catSel = makeSelect('category', 'Category', [['all', 'Every category']].concat(categories.map(function (c) { return [c, c]; })), state.category, function (v) { state.category = v; }, true);
     var chainSel = makeSelect('chain', 'Chain', [['all', 'Every chain']].concat(chains.map(function (c) { return [c, c]; })), state.chain, function (v) { state.chain = v; });
     var verdictSel = makeSelect('verdict', 'Verdict', [['all', 'Any verdict'], ['FARM', 'FARM'], ['THIN', 'THIN'], ['SKIP', 'SKIP']], state.verdict, function (v) { state.verdict = v; });
     var moveSel = makeSelect('move', 'Move', [['all', 'Any move'], ['up', 'Up, 7 days'], ['down', 'Down, 7 days']], state.move, function (v) { state.move = v; });
@@ -339,15 +320,13 @@
       return el('button', { type: 'button', class: 'pill' + (state.pill === id ? ' active' : ''), 'aria-pressed': state.pill === id ? 'true' : 'false', text: label,
         onclick: function () { state.pill = id; writeHash(); render(); } });
     }
-    var list = rows();
-    return el('div', null,
-      el('div', { class: 'controls' },
-        el('div', { class: 'field' }, el('label', { for: 'q', text: 'Search' }), search),
-        catSel, chainSel, verdictSel, moveSel
-      ),
-      el('div', { class: 'pills' }, pill('all', 'All'), pill('watchlist', 'Watchlist'), pill('early', 'Early'),
-        el('span', { class: 'count', text: list.length + ' of ' + DATA.board_size + ' shown \u00b7 click a column to sort, a row for its detail' })
-      )
+    // One line: search, four dropdowns and the Show pills share the row and
+    // their bottoms line up with the inputs. The count lives with the table.
+    return el('div', { class: 'controls' },
+      el('div', { class: 'field field-search' }, el('label', { for: 'q', text: 'Search' }), search),
+      catSel, chainSel, verdictSel, moveSel,
+      el('div', { class: 'field' }, el('label', { text: 'Show' }),
+        el('div', { class: 'pills' }, pill('all', 'All'), pill('watchlist', 'Watchlist'), pill('early', 'Early')))
     );
   }
 
@@ -459,6 +438,9 @@
       tbody.appendChild(tr);
     });
     return el('div', { class: 'panel' },
+      el('div', { class: 'table-meta' },
+        el('span', { class: 'count', text: list.length + ' of ' + DATA.board_size + ' shown \u00b7 click a column to sort, a row for its detail' })
+      ),
       el('div', { class: 'table-wrap' },
         el('table', { class: 'board-table' },
           el('thead', null, el('tr', null,
@@ -963,11 +945,10 @@
     if (state.tab === 'board') {
       shell.appendChild(hero());
       shell.appendChild(statsStrip());
-      shell.appendChild(topCards());
       shell.appendChild(tabBar());
       shell.appendChild(controls());
-      shell.appendChild(histogram());
       shell.appendChild(boardTable());
+      shell.appendChild(histogram());
     } else if (state.tab === 'live') {
       shell.appendChild(tabBar());
       shell.appendChild(liveTable());
