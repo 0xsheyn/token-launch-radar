@@ -28,9 +28,14 @@ at `/input/snapshot.json`, scores every pre-token protocol, and writes:
   pre-token protocols below the $50M floor), each with an implied value in USD
   and six concrete farm steps with cost and time.
 - `data.js` — the same board in compact form for the dashboard.
-- `dashboard/` — a static page (no network, no framework): sortable and
-  filterable board, a detail view for every protocol, a live-token tab, and
-  the model with its sector benchmarks.
+- `dashboard/` — a static page (no network, no framework): dark-blue
+  editorial theme with a lime accent; hero with a log-log scatter of TVL
+  against implied value; a six-stat strip; top-5 cards; four tabs
+  (pre-token board, live-token, set aside, model & calibration); sortable
+  and filterable board with a sensitivity range bar, an airdrop slice per
+  $1,000 and a FARM / THIN / SKIP verdict per row; a centred detail modal
+  for every protocol with a TVL slider, the value breakdown, farm
+  economics and the farm plan; and the model with its sector benchmarks.
 - `screenshots/` — three screenshots of the dashboard: the board, a protocol
   detail view, and a filtered view.
 - `dossier.json` — built with `buildDossier` from `vendor/makefun-board.ts`
@@ -104,9 +109,34 @@ is what tells them apart when the launch does not go as planned.
 Sensitivity changes nothing about the ranking. The board sorts on implied
 value exactly as before, every implied value is the same number it was, and
 the shocks are reported alongside so a reader can carry the range in their
-head instead of a single number. The dashboard does not display the shocks;
-they live in `board.json` only, for anyone who reads the data rather than
-the page.
+head instead of a single number. The dashboard shows the range too: a
+range bar on every table row and a Sensitivity section in the protocol
+detail modal, labelled as the TVL ±20% and growth ±0.25 shocks — not a
+confidence interval.
+
+## Farm verdicts
+
+Every row carries a verdict on its farm economics at a $1,000 deposit,
+computed from the row's own implied value and farm plan:
+
+```
+slice   = 10% of the launch to depositors pro rata: 0.10 x implied x $1,000 / TVL
+gas     = total gas of every transaction in the farm plan over the hold
+          ($3 first transaction + $8 setup, $4 when the capital tier is
+          under $150, + $2 per week of top-ups)
+forgone = 4% T-bill yield over the 30-day hold = $3.29
+net     = slice - gas - forgone
+```
+
+- **FARM** — net beats the T-bill: net > 0.
+- **THIN** — beats the fees only: net <= 0 but slice - gas > 0.
+- **SKIP** — does not beat the fees: slice - gas <= 0.
+
+On this snapshot the board splits FARM 48 / THIN 36 / SKIP 116, including
+6 of the top 10 as SKIP — the biggest implied values are not the best
+farms once the whole plan's gas is counted. The verdict never changes the
+ranking; it only prices the farm. The definitions, the gas accounting and
+the split are stated in the dashboard's Model & calibration tab.
 
 ## Farm plans
 
@@ -123,8 +153,9 @@ main.ts                  entrypoint: reads /input/snapshot.json, writes /output
 lib/model.ts             the radar-2 model, farm plans, board validation
 vendor/makefun-board.ts  make.fun's dossier library, copied unchanged
 dashboard/index.html     the page shell
-dashboard/app.css        the theme (one palette, no network)
-dashboard/app.js         board, filters, detail view, benchmarks
+dashboard/app.css        the theme (dark blue, lime accent, no network)
+dashboard/app.js         hero, scatter, stats, verdicts, tabs, filters,
+                         histogram, board, detail modal, benchmarks
 screenshots/              1-board.png, 2-detail.png, 3-filtered.png
 LICENSE                  MIT
 README.md                this file
