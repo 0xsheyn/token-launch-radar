@@ -1,4 +1,4 @@
-// The token radar's model, version radar-2: one snapshot of the protocol universe in, one
+// The token radar's model, version curve-1: one snapshot of the protocol universe in, one
 // ranked board out.
 //
 // The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and adds
@@ -8,25 +8,32 @@
 // values, never mixed into the ranked board. Say a protocol records no token, never that it has
 // none: the snapshot is DefiLlama's record, not proof.
 //
-// Implied value follows only from the snapshot's own figures, in four factors:
+// Implied value is a fitted size curve, not a sector multiple. The snapshot's 128 live tokens
+// are fitted by ordinary least squares on log10(market cap) against log10(TVL / $100M):
 //
-//   sector     = the sector's own FDV/TVL benchmark: the median market-cap-to-TVL ratio of the
-//                live-token protocols in the same category, shrunk toward the global median
-//                with a prior weight of 8 so a category with few live tokens does not set the
-//                price on its own. A category with fewer than three live tokens carries no
-//                sector signal of its own and takes the global benchmark: one live token,
-//                however large its ratio, must not price a whole sector. Clamped to [0.05, 1.00].
-//   base       = tvl_usd x sector
-//   growth     = clamp(change_7d, -60, 120) per cent
-//   growthMult = 1 + (growth / 100) x GROWTH_WEIGHT
-//   maturity   = 0.6 + min(age_days, 1095) / 1095 x 0.4   (age_days unknown: 365)
-//   chains     = 1 + 0.04 x min(chains - 1, 4)            (one chain: 1.00, five or more: 1.16)
-//   implied    = max(1, round(base x growthMult x maturity x chains))
+//   log10(mcap) = intercept + slope x log10(TVL / $100M)
 //
-// The constants are stated in the dashboard and changeable in the model sandbox. No protocol
-// name is ever special-cased: the same function scores every row, and the sector benchmark is
-// computed from the snapshot itself at run time, so the same code re-scores a future snapshot
-// with no hand-kept list.
+// The fitted slope is well under 1 (about 0.52 on this snapshot): a tenfold TVL buys only about
+// a threefold market cap, so the curve is sub-linear and the biggest protocols are not priced at
+// a flat multiple of their TVL. Each category then carries an offset: the median residual of its
+// live tokens around the curve, shrunk toward 0 with a prior weight of 8 (offset = 10^(median
+// residual x n / (n + 8))), clamped to [0.25, 4] in linear terms. A category with fewer than
+// three live tokens carries no offset of its own (offset 1): one live token, however far off the
+// curve, must not price a whole sector.
+//
+//   curve    = 10^(intercept + slope x log10(TVL / $100M))
+//   implied  = max(1, round(curve x sector_offset))            (variant A, the selected one)
+//
+// Variant B — the same curve and offset, times the radar-2 growth, maturity and chain factors
+// with their product capped to [0.67, 1.5] — was tested alongside variant A and rejected: it
+// loses to variant A on the leave-one-out median miss on both the blind test and the time
+// split, so the factors add variance without signal. Both variants' numbers are in the
+// validation the dashboard shows; nothing about the rejected variant is hidden.
+//
+// The curve, the offsets and the variant choice are all computed from the snapshot itself at
+// run time, so the same code re-scores a future snapshot with no hand-kept list and no
+// hard-coded coefficient. No protocol name is ever special-cased: the same function scores
+// every row.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -51,7 +58,12 @@ export interface Snapshot {
   watchlist: string[];
 }
 
-/** The model's constants, as the dashboard states them and the sandbox may change them. */
+/**
+ * The constants of the tested-but-rejected factor variant (variant B) and of the shrinkage:
+ * the dashboard states them and the variant comparison quotes them. Variant A, the selected
+ * one, uses only the fitted curve and the sector offsets; these constants exist so the
+ * rejected variant can be recomputed and checked, not because the board uses them.
+ */
 export interface ModelConstants {
   growth_weight: number;
   growth_floor: number;
@@ -61,8 +73,6 @@ export interface ModelConstants {
   maturity_days: number;
   unknown_age_days: number;
   prior_weight: number;
-  benchmark_floor: number;
-  benchmark_cap: number;
   chain_step: number;
   chain_cap: number;
 }
@@ -76,14 +86,30 @@ export const MODEL: ModelConstants = {
   maturity_days: 1095,
   unknown_age_days: 365,
   prior_weight: 8,
-  benchmark_floor: 0.05,
-  benchmark_cap: 1.0,
   chain_step: 0.04,
   chain_cap: 4,
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'curve-1';
+
+/** The TVL the size curve is centred on: log10(mcap) is fitted against log10(TVL / $100M). */
+export const REFERENCE_TVL_USD = 100_000_000;
+
+/** The smallest sector offset the shrinkage may leave, in linear terms. */
+export const OFFSET_FLOOR = 0.25;
+
+/** The largest sector offset the shrinkage may leave, in linear terms. */
+export const OFFSET_CAP = 4;
+
+/** The coldest the variant-B factor product may run, after the cap. */
+export const FACTOR_TOTAL_FLOOR = 0.67;
+
+/** The hottest the variant-B factor product may run, after the cap. */
+export const FACTOR_TOTAL_CAP = 1.5;
+
+/** Which variant the validation selected: 'a' is curve + sector offset, 'b' adds the factors. */
+export type ModelVariant = 'a' | 'b';
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
 export const EARLY_ROWS = 160;
@@ -98,12 +124,23 @@ export interface FarmStep {
   time: string;
 }
 
-/** One sector's benchmark: how its live tokens are valued against their TVL. */
-export interface SectorBenchmark {
+/** One sector's offset from the fitted curve: how its live tokens sit against the curve. */
+export interface SectorOffset {
   category: string;
   live_count: number;
-  median_ratio: number | null;
-  benchmark: number;
+  /** The median log10 residual of the category's live tokens around the curve, or null when it has none. */
+  median_residual: number | null;
+  /** The offset applied to the curve: 10^(median residual shrunk toward 0), clamped to [0.25, 4]; 1 when fewer than three live tokens. */
+  offset: number;
+}
+
+/** The fitted size curve: OLS on log10(market cap) against log10(TVL / $100M) over the live tokens. */
+export interface CurveFit {
+  intercept: number;
+  slope: number;
+  r2: number;
+  n: number;
+  reference_tvl_usd: number;
 }
 
 /** One row of board.json: the ranked board's row. */
@@ -124,11 +161,12 @@ export interface BoardRow {
   implied_value_usd: number;
   sensitivity: LaunchSensitivity;
   model: {
-    sector_multiple: number;
-    growth_pct: number;
+    curve_value_usd: number;
+    sector_offset: number;
     growth_multiplier: number;
     maturity_multiplier: number;
     chain_multiplier: number;
+    factor_total: number;
     age_days: number | null;
   };
   farm_steps: string[];
@@ -177,10 +215,12 @@ export interface RadarRow {
   implied_value_usd: number;
   sensitivity: LaunchSensitivity;
   economics: FarmEconomics;
-  sector_multiple: number;
+  curve_value_usd: number;
+  sector_offset: number;
   growth_multiplier: number;
   maturity_multiplier: number;
   chain_multiplier: number;
+  factor_total: number;
   watchlist: boolean;
 }
 
@@ -218,13 +258,15 @@ export interface RadarData {
   floor_usd: number;
   model: ModelConstants;
   model_version: string;
+  fit: CurveFit;
+  sector_offsets: SectorOffset[];
+  variant_selected: ModelVariant;
   watchlist_size: number;
   board_size: number;
   early_size: number;
   live_size: number;
   record_no_token: number;
   set_aside: SetAsideGroup[];
-  benchmarks: SectorBenchmark[];
   global_benchmark: number;
   validation: ModelValidation;
   rows: RadarRow[];
@@ -253,47 +295,111 @@ function medianOf(sorted: number[]): number | null {
   return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
-/** Minimum live tokens for a category to price itself; fewer take the global benchmark. */
+/** A quantile of a sorted array by linear interpolation, the same rule the independent check uses. */
+function quantileOf(sorted: number[], q: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = (sorted.length - 1) * q;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (idx - lo);
+}
+
+/** Minimum live tokens for a category to carry an offset of its own; fewer take offset 1. */
 export const MIN_SECTOR_LIVE = 3;
 
+/** A protocol the fit and the backtest can use: it trades, so its market cap is the ground truth. */
+function isLiveTest(p: SnapshotProtocol): boolean {
+  return p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0;
+}
+
 /**
- * The sector benchmarks, computed from this snapshot's own live-token protocols: for every
- * category with at least three live tokens, the median market-cap-to-TVL ratio of its live
- * tokens, shrunk toward the global median with the model's prior weight, then clamped. A
- * category with fewer than three live tokens takes the global median: one live token's ratio
- * must not price a whole sector. Deterministic: the same snapshot always gives the same table.
+ * The fitted size curve: ordinary least squares on log10(market cap) against log10(TVL /
+ * $100M) over the given live tokens. Deterministic: the same tokens always give the same fit.
+ * The intercept and slope are kept to six decimals and the R² to four, and everything
+ * downstream — the board, the validation, the dashboard's recomputation — uses these rounded
+ * values, so the fit the page shows is the fit the board was scored with.
  */
-export function computeBenchmarks(snapshot: Snapshot, model: ModelConstants = MODEL, only?: (p: SnapshotProtocol) => boolean): { global: number; byCategory: SectorBenchmark[] } {
-  const allRatios: number[] = [];
+export function fitCurve(tokens: SnapshotProtocol[]): CurveFit {
+  const pts = tokens.filter(isLiveTest).map((p) => ({ x: Math.log10(p.tvl_usd / REFERENCE_TVL_USD), y: Math.log10(p.mcap_usd!) }));
+  const n = pts.length;
+  if (n < 2) return { intercept: 0, slope: 0, r2: 0, n, reference_tvl_usd: REFERENCE_TVL_USD };
+  const mx = pts.reduce((a, p) => a + p.x, 0) / n;
+  const my = pts.reduce((a, p) => a + p.y, 0) / n;
+  let sxx = 0;
+  let sxy = 0;
+  let ssTot = 0;
+  for (const p of pts) {
+    sxx += (p.x - mx) ** 2;
+    sxy += (p.x - mx) * (p.y - my);
+    ssTot += (p.y - my) ** 2;
+  }
+  const slope = sxx === 0 ? 0 : sxy / sxx;
+  const intercept = my - slope * mx;
+  let ssRes = 0;
+  for (const p of pts) ssRes += (p.y - (intercept + slope * p.x)) ** 2;
+  const r2 = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+  return {
+    intercept: Math.round(intercept * 1e6) / 1e6,
+    slope: Math.round(slope * 1e6) / 1e6,
+    r2: Math.round(r2 * 1e4) / 1e4,
+    n,
+    reference_tvl_usd: REFERENCE_TVL_USD,
+  };
+}
+
+/**
+ * The sector offsets around a fitted curve: for every category, the median log10 residual of
+ * its live tokens around the curve, shrunk toward 0 with the model's prior weight and turned
+ * into a linear offset, clamped to [0.25, 4]. A category with fewer than three live tokens
+ * carries no offset of its own and takes 1: one live token's residual must not price a whole
+ * sector. `categories` defaults to the categories the tokens themselves carry; the board
+ * passes every category in the snapshot so the table is complete. Deterministic.
+ */
+export function computeOffsets(
+  tokens: SnapshotProtocol[],
+  fit: CurveFit,
+  categories?: string[],
+): SectorOffset[] {
   const byCategory = new Map<string, number[]>();
-  for (const p of snapshot.protocols) {
-    if (only !== undefined && !only(p)) continue;
-    if (p.mcap_usd === null || p.mcap_usd <= 0 || p.tvl_usd <= 0) continue;
-    const ratio = p.mcap_usd / p.tvl_usd;
-    allRatios.push(ratio);
+  for (const p of tokens.filter(isLiveTest)) {
+    const r = Math.log10(p.mcap_usd!) - (fit.intercept + fit.slope * Math.log10(p.tvl_usd / fit.reference_tvl_usd));
     const key = p.category ?? 'Other';
     const list = byCategory.get(key);
-    if (list === undefined) byCategory.set(key, [ratio]);
-    else list.push(ratio);
+    if (list === undefined) byCategory.set(key, [r]);
+    else list.push(r);
   }
-  allRatios.sort((a, b) => a - b);
-  const globalMedian = medianOf(allRatios) ?? 0.2;
-  const global = Math.min(model.benchmark_cap, Math.max(model.benchmark_floor, globalMedian));
-  const out: SectorBenchmark[] = [];
-  const categories = new Set<string>(snapshot.protocols.map((p) => p.category ?? 'Other'));
-  for (const category of [...categories].sort()) {
-    const ratios = (byCategory.get(category) ?? []).sort((a, b) => a - b);
-    const catMedian = medianOf(ratios);
-    const benchmark =
-      catMedian === null || ratios.length < MIN_SECTOR_LIVE
-        ? global
-        : Math.min(
-            model.benchmark_cap,
-            Math.max(model.benchmark_floor, (ratios.length * catMedian + model.prior_weight * globalMedian) / (ratios.length + model.prior_weight)),
-          );
-    out.push({ category, live_count: ratios.length, median_ratio: catMedian === null ? null : Math.round(catMedian * 10000) / 10000, benchmark: Math.round(benchmark * 10000) / 10000 });
+  const cats = categories ?? [...byCategory.keys()];
+  const out: SectorOffset[] = [];
+  for (const category of [...new Set(cats)].sort()) {
+    const residuals = (byCategory.get(category) ?? []).sort((a, b) => a - b);
+    const med = medianOf(residuals);
+    const offset =
+      med === null || residuals.length < MIN_SECTOR_LIVE
+        ? 1
+        : Math.min(OFFSET_CAP, Math.max(OFFSET_FLOOR, Math.pow(10, med * (residuals.length / (residuals.length + MODEL.prior_weight)))));
+    out.push({
+      category,
+      live_count: residuals.length,
+      median_residual: med === null ? null : Math.round(med * 1e4) / 1e4,
+      offset: Math.round(offset * 1e4) / 1e4,
+    });
   }
-  return { global: Math.round(global * 10000) / 10000, byCategory: out };
+  return out;
+}
+
+/** The flat benchmark: the median market-cap-to-TVL ratio of the given live tokens. */
+export function flatBenchmark(tokens: SnapshotProtocol[]): number {
+  const ratios = tokens
+    .filter(isLiveTest)
+    .map((p) => p.mcap_usd! / p.tvl_usd)
+    .sort((a, b) => a - b);
+  const med = medianOf(ratios) ?? 0.2;
+  return Math.round(med * 1e4) / 1e4;
+}
+
+/** The curve's value for one TVL, from a fitted curve. */
+export function curveValue(tvlUsd: number, fit: CurveFit): number {
+  return Math.pow(10, fit.intercept + fit.slope * Math.log10(tvlUsd / fit.reference_tvl_usd));
 }
 
 /** A whole day count from `from` to `to`, clamped at zero; null when either date is absent or bad. */
@@ -305,13 +411,17 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
   return Math.max(0, Math.floor((a - b) / DAY_MS));
 }
 
-/** The four multipliers and the implied value one protocol gets under `model`. */
-export function impliedValue(
+/**
+ * The variant-B factors for one protocol, from the radar-2 constants: growth from the clamped
+ * 7-day change, maturity from the age with no token, chains from the chain count. The product
+ * is capped to [0.67, 1.5] so the factors can move a row by at most half in either direction.
+ * Variant A does not use them; they are computed here so variant B can be tested honestly.
+ */
+export function factorProduct(
   protocol: SnapshotProtocol,
   asOf: string,
   model: ModelConstants,
-  benchmarks: { global: number; byCategory: SectorBenchmark[] },
-): { implied: number; sector: number; growthPct: number; growthMult: number; maturityMult: number; chainMult: number; age: number | null } {
+): { growthMult: number; maturityMult: number; chainMult: number; total: number } {
   const age = ageDays(asOf, protocol.listed_at);
   const rawGrowth = finite(protocol.change_7d, 0);
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
@@ -319,121 +429,112 @@ export function impliedValue(
   const ageForModel = age ?? model.unknown_age_days;
   const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
   const chainMult = 1 + model.chain_step * Math.min(Math.max(protocol.chains.length - 1, 0), model.chain_cap);
-  const sector = benchmarks.byCategory.find((b) => b.category === (protocol.category ?? 'Other'))?.benchmark ?? benchmarks.global;
-  const base = protocol.tvl_usd * sector;
-  const implied = Math.max(1, Math.round(base * growthMult * maturityMult * chainMult));
-  return { implied, sector, growthPct, growthMult, maturityMult, chainMult, age };
+  const total = Math.min(FACTOR_TOTAL_CAP, Math.max(FACTOR_TOTAL_FLOOR, growthMult * maturityMult * chainMult));
+  return { growthMult, maturityMult, chainMult, total };
+}
+
+/** The curve value, the sector offset and the implied value one protocol gets under `variant`. */
+export function impliedValue(
+  protocol: SnapshotProtocol,
+  asOf: string,
+  model: ModelConstants,
+  fit: CurveFit,
+  offsets: SectorOffset[],
+  variant: ModelVariant,
+): { implied: number; curve: number; offset: number; growthMult: number; maturityMult: number; chainMult: number; factorTotal: number; age: number | null } {
+  const age = ageDays(asOf, protocol.listed_at);
+  const curve = curveValue(protocol.tvl_usd, fit);
+  const offset = offsets.find((b) => b.category === (protocol.category ?? 'Other'))?.offset ?? 1;
+  const f = factorProduct(protocol, asOf, model);
+  const factorTotal = variant === 'b' ? f.total : 1;
+  const implied = Math.max(1, Math.round(curve * offset * factorTotal));
+  return {
+    implied,
+    curve: Math.round(curve),
+    offset,
+    growthMult: variant === 'b' ? Math.round(f.growthMult * 1e4) / 1e4 : 1,
+    maturityMult: variant === 'b' ? Math.round(f.maturityMult * 1e4) / 1e4 : 1,
+    chainMult: variant === 'b' ? Math.round(f.chainMult * 1e4) / 1e4 : 1,
+    factorTotal: variant === 'b' ? Math.round(f.total * 1e4) / 1e4 : 1,
+    age,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Launch-value sensitivity
 // An implied value is a point estimate, and a point estimate hides how much
-// it leans on its inputs. Two of the four factors move fast around a launch:
-// the TVL, which one large deposit or withdrawal can move overnight, and the
-// 7-day growth, the noisiest number the snapshot carries. The sector
-// benchmark, the protocol's age and its chain count move slowly, so this
-// section holds those three still and shakes only the two fast inputs:
-//   TVL 20% higher at launch          -> tvlShockUp
-//   TVL 20% lower at launch           -> tvlShockDown
-//   growth multiplier 0.25 hotter     -> growthShockUp
-//   growth multiplier 0.25 colder     -> growthShockDown
-//
-// The growth shocks are clamped to [0.5, 1.8]: below 0.5 would mean a
-// shrinkage worse than the growth floor allows, above 1.8 a weekly run
-// hotter than the growth cap allows. The spread between the highest and the
-// lowest shocked value, as a percentage of the row's own implied value, is
-// the row's sensitivitySpreadPct: a wide spread means the launch value is
-// fragile, a narrow one means it barely moves when the fast inputs turn
-// against it. Nothing here changes the ranking or the implied value; the
-// board sorts exactly as before, and the shocks are reported alongside it
-// so a reader can carry the range instead of a single number.
+// the model itself misses. The honest range for a row is not a shock to its
+// inputs but the model's own out-of-sample error: the leave-one-out
+// residuals of the selected variant, log10(actual / predicted) over the 128
+// live tokens. A row's P10–P90 is its implied value times the 10th and 90th
+// percentiles of those residuals (as linear factors); P25–P75 the same with
+// the quartiles. The range is wide — the median miss is above 3x — and the
+// dashboard shows it wide rather than shrinking it. Nothing here changes
+// the ranking or the implied value; the board sorts exactly as before, and
+// the range is reported alongside so a reader can carry the model's own
+// error instead of a single number.
 // ---------------------------------------------------------------------------
 
-/** How far a protocol's TVL may swing in the shock, up or down. */
-export const TVL_SHOCK = 0.2;
-
-/** How far the growth multiplier may swing in the shock, up or down. */
-export const GROWTH_SHOCK = 0.25;
-
-/** The coldest growth multiplier a shock may reach. */
-export const GROWTH_MULT_FLOOR = 0.5;
-
-/** The hottest growth multiplier a shock may reach. */
-export const GROWTH_MULT_CEILING = 1.8;
-
-/** One row's launch-value sensitivity: four shocked implied values and their spread. */
+/** One row's launch-value sensitivity: the model's own out-of-sample error, as a range around the implied value. */
 export interface LaunchSensitivity {
-  /** Implied value with TVL 20% higher at launch, everything else held. */
-  tvlShockUp: number;
-  /** Implied value with TVL 20% lower at launch, everything else held. */
-  tvlShockDown: number;
-  /** Implied value with the growth multiplier 0.25 hotter, everything else held. */
-  growthShockUp: number;
-  /** Implied value with the growth multiplier 0.25 colder, everything else held. */
-  growthShockDown: number;
-  /** The four shocks' spread as a percentage of the row's own implied value. */
-  sensitivitySpreadPct: number;
+  /** Implied value times the 10th percentile of the leave-one-out residuals (linear factor). */
+  p10: number;
+  /** Implied value times the 25th percentile of the leave-one-out residuals. */
+  p25: number;
+  /** Implied value times the 75th percentile of the leave-one-out residuals. */
+  p75: number;
+  /** Implied value times the 90th percentile of the leave-one-out residuals. */
+  p90: number;
+  /** The P10–P90 spread as a percentage of the row's own implied value. */
+  spread_pct: number;
 }
 
-/** A growth multiplier held inside the shock's sane range. */
-function clampGrowthMult(mult: number): number {
-  return Math.min(GROWTH_MULT_CEILING, Math.max(GROWTH_MULT_FLOOR, mult));
+/** The residual quantiles the sensitivity is priced from: linear factors from the leave-one-out residuals. */
+export interface ResidualQuantiles {
+  p10: number;
+  p25: number;
+  p75: number;
+  p90: number;
 }
+
+/** A dollar figure to two decimals. */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
 
 /**
- * One implied value from its parts, on the same rule as the model itself:
- * the base times the three multipliers, rounded, never below one dollar.
- */
-function rescoreImplied(base: number, growthMult: number, maturityMult: number, chainMult: number): number {
-  return Math.max(1, Math.round(base * growthMult * maturityMult * chainMult));
-}
-
-/**
- * A protocol's launch-value sensitivity: the implied value under a TVL shock
- * of twenty per cent either way and a growth-multiplier shock of a quarter
- * either way, with the sector, the maturity and the chain multipliers held
- * exactly as the model scored them. The spread is the distance between the
- * highest and the lowest shocked value, in per cent of the row's own
+ * A protocol's launch-value sensitivity: its implied value times the
+ * leave-one-out residual quantiles of the selected variant. The spread is
+ * the distance between the P90 and the P10, in per cent of the row's own
  * implied value, rounded to two decimals.
  */
-export function launchSensitivity(
-  protocol: SnapshotProtocol,
-  asOf: string,
-  model: ModelConstants,
-  benchmarks: { global: number; byCategory: SectorBenchmark[] },
-): LaunchSensitivity {
-  const v = impliedValue(protocol, asOf, model, benchmarks);
-  const base = protocol.tvl_usd * v.sector;
-  const tvlShockUp = rescoreImplied(base * (1 + TVL_SHOCK), v.growthMult, v.maturityMult, v.chainMult);
-  const tvlShockDown = rescoreImplied(base * (1 - TVL_SHOCK), v.growthMult, v.maturityMult, v.chainMult);
-  const growthShockUp = rescoreImplied(base, clampGrowthMult(v.growthMult + GROWTH_SHOCK), v.maturityMult, v.chainMult);
-  const growthShockDown = rescoreImplied(base, clampGrowthMult(v.growthMult - GROWTH_SHOCK), v.maturityMult, v.chainMult);
-  const highest = Math.max(tvlShockUp, tvlShockDown, growthShockUp, growthShockDown);
-  const lowest = Math.min(tvlShockUp, tvlShockDown, growthShockUp, growthShockDown);
-  const sensitivitySpreadPct = Math.round(((highest - lowest) / v.implied) * 10000) / 100;
-  return { tvlShockUp, tvlShockDown, growthShockUp, growthShockDown, sensitivitySpreadPct };
+export function launchSensitivity(implied: number, q: ResidualQuantiles): LaunchSensitivity {
+  const p10 = Math.max(1, Math.round(implied * q.p10));
+  const p25 = Math.max(1, Math.round(implied * q.p25));
+  const p75 = Math.max(1, Math.round(implied * q.p75));
+  const p90 = Math.max(1, Math.round(implied * q.p90));
+  return { p10, p25, p75, p90, spread_pct: round2(((p90 - p10) / implied) * 100) };
 }
 
 /**
- * Why one row's sensitivity is not one the gate will take, or null: the
- * four shocked values must be positive whole dollars, the TVL shock up must
- * sit above the TVL shock down, the growth shock up must sit above the
- * growth shock down, and the spread must be a finite, non-negative
- * percentage of a positive implied value.
+ * Why one row's sensitivity is not one the gate will take, or null: the four
+ * range values must be positive whole dollars in order, and the spread must
+ * be a finite, non-negative percentage of a positive implied value.
  */
 export function sensitivityIssue(s: LaunchSensitivity, implied: number): string | null {
-  const shocks: [string, number][] = [
-    ['tvlShockUp', s.tvlShockUp],
-    ['tvlShockDown', s.tvlShockDown],
-    ['growthShockUp', s.growthShockUp],
-    ['growthShockDown', s.growthShockDown],
+  const values: [string, number][] = [
+    ['p10', s.p10],
+    ['p25', s.p25],
+    ['p75', s.p75],
+    ['p90', s.p90],
   ];
-  for (const [name, value] of shocks) {
+  for (const [name, value] of values) {
     if (!Number.isSafeInteger(value) || value <= 0) return `sensitivity ${name} is ${value}`;
   }
-  if (s.tvlShockUp < s.tvlShockDown) return 'sensitivity TVL shocks are inverted';
-  if (s.growthShockUp < s.growthShockDown) return 'sensitivity growth shocks are inverted';
-  if (!Number.isFinite(s.sensitivitySpreadPct) || s.sensitivitySpreadPct < 0) return `sensitivity spread is ${s.sensitivitySpreadPct}`;
+  if (!(s.p10 <= s.p25 && s.p25 <= s.p75 && s.p75 <= s.p90)) return 'sensitivity range is not ordered';
+  if (!Number.isFinite(s.spread_pct) || s.spread_pct < 0) return `sensitivity spread is ${s.spread_pct}`;
   if (implied <= 0) return 'sensitivity needs a positive implied value';
   return null;
 }
@@ -465,8 +566,19 @@ export interface BoardSummary {
 }
 
 /** The protocols the board ranks, strongest first, with ranks 1..n. */
-export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
-  const benchmarks = computeBenchmarks(snapshot, model);
+export function buildBoard(
+  snapshot: Snapshot,
+  model: ModelConstants = MODEL,
+  fit?: CurveFit,
+  offsets?: SectorOffset[],
+  variant: ModelVariant = 'a',
+  quantiles?: ResidualQuantiles,
+): BoardRow[] {
+  const liveAll = snapshot.protocols.filter(isLiveTest);
+  const useFit = fit ?? fitCurve(liveAll);
+  const categories = [...new Set(snapshot.protocols.map((p) => p.category ?? 'Other'))];
+  const useOffsets = offsets ?? computeOffsets(liveAll, useFit, categories);
+  const useQuantiles = quantiles ?? { p10: 0.1, p25: 0.3, p75: 3, p90: 8 };
   const index = bySlug(snapshot.protocols);
   const chosen = new Map<string, SnapshotProtocol>();
   // The watchlist is the floor: every slug, even one the snapshot no longer carries (it cannot, but the
@@ -484,8 +596,8 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
   for (const p of early) chosen.set(p.slug, p);
 
   const scored = [...chosen.values()].map((p) => {
-    const v = impliedValue(p, snapshot.as_of, model, benchmarks);
-    const sensitivity = launchSensitivity(p, snapshot.as_of, model, benchmarks);
+    const v = impliedValue(p, snapshot.as_of, model, useFit, useOffsets, variant);
+    const sensitivity = launchSensitivity(v.implied, useQuantiles);
     return { p, ...v, sensitivity };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
@@ -506,18 +618,17 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     implied_value_usd: s.implied,
     sensitivity: s.sensitivity,
     model: {
-      sector_multiple: round4(s.sector),
-      growth_pct: s.growthPct,
-      growth_multiplier: round4(s.growthMult),
-      maturity_multiplier: round4(s.maturityMult),
-      chain_multiplier: round4(s.chainMult),
+      curve_value_usd: s.curve,
+      sector_offset: round4(s.offset),
+      growth_multiplier: s.growthMult,
+      maturity_multiplier: s.maturityMult,
+      chain_multiplier: s.chainMult,
+      factor_total: s.factorTotal,
       age_days: s.age,
     },
     farm_steps: farmSteps(s.p, s.age).map(stepText),
   }));
 }
-
-const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
 
 /** A step as one string: its action, then its cost and time, within the gate's 20..600 characters. */
 export function stepText(step: FarmStep): string {
@@ -594,11 +705,6 @@ export const FARM_TBILL_RATE = 0.04;
 
 /** The days of T-bill yield the deposit forgoes. */
 export const FARM_TBILL_DAYS = 30;
-
-/** A dollar figure to two decimals. */
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
 
 /**
  * The plan's whole gas over the hold, summed from the gas the plan's own steps state: $3 for the
@@ -810,19 +916,25 @@ export function radarRow(row: BoardRow): RadarRow {
     implied_value_usd: row.implied_value_usd,
     sensitivity: row.sensitivity,
     economics: farmEconomics(row.implied_value_usd, row.tvl_usd, row.age_days),
-    sector_multiple: row.model.sector_multiple,
+    curve_value_usd: row.model.curve_value_usd,
+    sector_offset: row.model.sector_offset,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
     chain_multiplier: row.model.chain_multiplier,
+    factor_total: row.model.factor_total,
     watchlist: false,
   };
 }
 
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
-  const board = buildBoard(snapshot, model);
+  const validation = validateModel(snapshot, model);
+  const liveAll = snapshot.protocols.filter(isLiveTest);
+  const fit = fitCurve(liveAll);
+  const categories = [...new Set(snapshot.protocols.map((p) => p.category ?? 'Other'))];
+  const offsets = computeOffsets(liveAll, fit, categories);
+  const board = buildBoard(snapshot, model, fit, offsets, validation.variant_selected, validation.residual_quantiles);
   const live = liveRows(snapshot);
-  const benchmarks = computeBenchmarks(snapshot, model);
   const early = board.filter((r) => !snapshot.watchlist.includes(r.slug)).length;
   const radar: RadarData = {
     as_of: snapshot.as_of,
@@ -830,15 +942,17 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     floor_usd: snapshot.floor_usd,
     model,
     model_version: MODEL_VERSION,
+    fit,
+    sector_offsets: offsets,
+    variant_selected: validation.variant_selected,
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
     early_size: early,
     live_size: live.length,
     record_no_token: snapshot.protocols.filter(isPreToken).length,
     set_aside: setAsideGroups(snapshot, board, live),
-    benchmarks: benchmarks.byCategory,
-    global_benchmark: benchmarks.global,
-    validation: validateModel(snapshot, model),
+    global_benchmark: flatBenchmark(liveAll),
+    validation,
     rows: board.map((r) => ({ ...radarRow(r), watchlist: snapshot.watchlist.includes(r.slug) })),
     live,
   };
@@ -889,20 +1003,24 @@ export function parseSnapshot(text: string): Snapshot {
 }
 
 // ---------------------------------------------------------------------------
-// Backtest: does radar-2 predict a token's market cap?
+// Backtest: does curve-1 predict a token's market cap?
 // The model is fitted on the snapshot's own live tokens, so it can be tested
 // against them: a live token's market cap is the ground truth, and the model
-// predicts it from the token's TVL, sector, growth, age and chains — the same
-// function that scores the board. Two tests, both blind in the sense that the
-// tested token never prices itself:
-//   leave-one-out: every live token in turn, predicted with the sector
-//     benchmarks recomputed without it (the same median-shrink-clamp rule,
-//     the same prior weight, the same three-live-token floor).
-//   time-split: the benchmarks are fitted on the live tokens listed before
-//     2024-01-01 and tested on the ones listed in 2024 or later — the curve
-//     is fitted on the past and read on the future, as far as one snapshot
-//     allows. Tokens with no listing date cannot be placed on either side
-//     and are excluded from the split, and the count says so.
+// predicts it from the token's TVL and its sector offset — the same function
+// that scores the board. Two variants are tested, and the variant with the
+// better leave-one-out median miss is the one the board uses:
+//   variant A: the fitted curve times the sector offset.
+//   variant B: variant A times the radar-2 growth, maturity and chain
+//     factors, with their product capped to [0.67, 1.5].
+// Two tests, both blind in the sense that the tested token never prices
+// itself:
+//   leave-one-out: every live token in turn, predicted with the curve and
+//     the offsets refitted without it.
+//   time-split: the curve and the offsets are fitted on the live tokens
+//     listed before 2024-01-01 and tested on the ones listed in 2024 or
+//     later — the curve is fitted on the past and read on the future, as far
+//     as one snapshot allows. Tokens with no listing date cannot be placed
+//     on either side and are excluded from the split, and the count says so.
 // The flat benchmark is the same test with one number instead of a model:
 // the global median market-cap-to-TVL ratio times the token's TVL. It is the
 // model to beat, and when the model does not beat it the table says so.
@@ -912,13 +1030,11 @@ export function parseSnapshot(text: string): Snapshot {
 // 80% band the 80th percentile of the misses (nearest rank). The ground
 // truth is the market cap TODAY, from the snapshot — not the price at
 // launch, which no snapshot carries. That is the test's honest limit, and
-// the dashboard states it.
+// the dashboard states it. The sensitivity ranges on the board come from
+// the selected variant's leave-one-out residuals: log10(actual / predicted),
+// whose 10th, 25th, 75th and 90th percentiles (linear interpolation) are
+// the factors the P10–P90 and P25–P75 ranges are priced from.
 // ---------------------------------------------------------------------------
-
-/** A protocol the backtest can score: it trades, so its market cap is the ground truth. */
-function isLiveTest(p: SnapshotProtocol): boolean {
-  return p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0;
-}
 
 /** The first day of the test half of the time split: tokens listed on or after it are tested. */
 export const TIMESPLIT_DATE = '2024-01-01';
@@ -953,8 +1069,12 @@ export interface ModelValidation {
   listed_n: number;
   no_date_n: number;
   split_date: string;
+  variant_selected: ModelVariant;
+  variant_a: { loo: BacktestMetrics; timesplit: BacktestMetrics };
+  variant_b: { loo: BacktestMetrics; timesplit: BacktestMetrics };
   loo: { n: number; model: BacktestMetrics; flat: BacktestMetrics };
   timesplit: { fit_n: number; test_n: number; excluded_n: number; model: BacktestMetrics; flat: BacktestMetrics; points: BacktestPoint[] };
+  residual_quantiles: ResidualQuantiles;
 }
 
 /** One test's numbers from its misses: the median, the shares inside 2x and 3x, and the bands. */
@@ -977,48 +1097,84 @@ function summarizeMisses(misses: number[]): BacktestMetrics {
 /**
  * The backtest, from the snapshot alone: leave-one-out over every live token
  * and a time split fitted on the pre-2024 listings and tested on the 2024+
- * listings, each against the flat benchmark on the same tokens. Nothing here
- * changes the board: the board is scored once, from the whole snapshot, and
- * this only asks how far that same scoring misses when it is asked to
- * predict a token that already trades.
+ * listings, each for both variants and against the flat benchmark on the
+ * same tokens. The variant with the better leave-one-out median miss is
+ * selected; a tie goes to variant A, the simpler one. The residual
+ * quantiles come from the selected variant's leave-one-out residuals.
+ * Nothing here changes the board except through the selection: the board is
+ * scored once, from the whole snapshot, with the selected variant.
  */
 export function validateModel(snapshot: Snapshot, model: ModelConstants = MODEL): ModelValidation {
   const live = snapshot.protocols.filter(isLiveTest);
   const listed = live.filter((p) => p.listed_at !== null);
   const noDate = live.length - listed.length;
 
-  // Leave-one-out: each live token predicted with the benchmarks recomputed without it.
-  const looModel: number[] = [];
+  // Leave-one-out, both variants: each live token predicted with the curve and the offsets
+  // refitted without it. The flat benchmark is the median ratio of the rest.
+  const looMiss: Record<ModelVariant, number[]> = { a: [], b: [] };
   const looFlat: number[] = [];
+  const looResidual: Record<ModelVariant, number[]> = { a: [], b: [] };
   for (const p of live) {
-    const bench = computeBenchmarks(snapshot, model, (q) => q.slug !== p.slug);
-    const pred = impliedValue(p, snapshot.as_of, model, bench).implied;
-    looModel.push(missOf(pred, p.mcap_usd!));
-    looFlat.push(missOf(bench.global * p.tvl_usd, p.mcap_usd!));
+    const rest = live.filter((q) => q.slug !== p.slug);
+    const fit = fitCurve(rest);
+    const offs = computeOffsets(rest, fit);
+    for (const variant of ['a', 'b'] as ModelVariant[]) {
+      const pred = impliedValue(p, snapshot.as_of, model, fit, offs, variant).implied;
+      looMiss[variant].push(missOf(pred, p.mcap_usd!));
+      looResidual[variant].push(Math.log10(p.mcap_usd! / pred));
+    }
+    looFlat.push(missOf(flatBenchmark(rest) * p.tvl_usd, p.mcap_usd!));
   }
 
-  // Time-split: benchmarks from the pre-2024 listings only, tested on the 2024+ listings.
+  // Time-split: the curve and the offsets from the pre-2024 listings only, tested on the 2024+
+  // listings, both variants and the flat benchmark on the same tokens.
   const fitSlugs = new Set(listed.filter((p) => p.listed_at! < TIMESPLIT_DATE).map((p) => p.slug));
+  const fitSet = listed.filter((p) => fitSlugs.has(p.slug));
   const test = listed.filter((p) => p.listed_at! >= TIMESPLIT_DATE);
-  const bench = computeBenchmarks(snapshot, model, (q) => fitSlugs.has(q.slug));
-  const tsModel: number[] = [];
+  const tsFit = fitCurve(fitSet);
+  const tsOffs = computeOffsets(fitSet, tsFit);
+  const tsFlatRatio = flatBenchmark(fitSet);
+  const tsMiss: Record<ModelVariant, number[]> = { a: [], b: [] };
   const tsFlat: number[] = [];
-  const points: BacktestPoint[] = [];
+  const tsPred: Record<ModelVariant, Map<string, number>> = { a: new Map(), b: new Map() };
   for (const p of test) {
-    const pred = impliedValue(p, snapshot.as_of, model, bench).implied;
-    tsModel.push(missOf(pred, p.mcap_usd!));
-    tsFlat.push(missOf(bench.global * p.tvl_usd, p.mcap_usd!));
-    points.push({ slug: p.slug, name: p.name, tvl_usd: p.tvl_usd, actual_usd: p.mcap_usd!, predicted_usd: pred });
+    for (const variant of ['a', 'b'] as ModelVariant[]) {
+      const pred = impliedValue(p, snapshot.as_of, model, tsFit, tsOffs, variant).implied;
+      tsMiss[variant].push(missOf(pred, p.mcap_usd!));
+      tsPred[variant].set(p.slug, pred);
+    }
+    tsFlat.push(missOf(tsFlatRatio * p.tvl_usd, p.mcap_usd!));
   }
-  points.sort((a, b) => b.actual_usd - a.actual_usd);
+
+  const looA = summarizeMisses(looMiss.a);
+  const looB = summarizeMisses(looMiss.b);
+  const tsA = summarizeMisses(tsMiss.a);
+  const tsB = summarizeMisses(tsMiss.b);
+  const selected: ModelVariant = looA.median_miss <= looB.median_miss ? 'a' : 'b';
+
+  const residuals = [...looResidual[selected]].sort((a, b) => a - b);
+  const residualQuantiles: ResidualQuantiles = {
+    p10: round4(Math.pow(10, quantileOf(residuals, 0.1))),
+    p25: round4(Math.pow(10, quantileOf(residuals, 0.25))),
+    p75: round4(Math.pow(10, quantileOf(residuals, 0.75))),
+    p90: round4(Math.pow(10, quantileOf(residuals, 0.9))),
+  };
+
+  const points: BacktestPoint[] = test
+    .map((p) => ({ slug: p.slug, name: p.name, tvl_usd: p.tvl_usd, actual_usd: p.mcap_usd!, predicted_usd: tsPred[selected].get(p.slug)! }))
+    .sort((a, b) => b.actual_usd - a.actual_usd);
 
   return {
     live_n: live.length,
     listed_n: listed.length,
     no_date_n: noDate,
     split_date: TIMESPLIT_DATE,
-    loo: { n: live.length, model: summarizeMisses(looModel), flat: summarizeMisses(looFlat) },
-    timesplit: { fit_n: fitSlugs.size, test_n: test.length, excluded_n: noDate, model: summarizeMisses(tsModel), flat: summarizeMisses(tsFlat), points },
+    variant_selected: selected,
+    variant_a: { loo: looA, timesplit: tsA },
+    variant_b: { loo: looB, timesplit: tsB },
+    loo: { n: live.length, model: selected === 'a' ? looA : looB, flat: summarizeMisses(looFlat) },
+    timesplit: { fit_n: fitSlugs.size, test_n: test.length, excluded_n: noDate, model: selected === 'a' ? tsA : tsB, flat: summarizeMisses(tsFlat), points },
+    residual_quantiles: residualQuantiles,
   };
 }
 

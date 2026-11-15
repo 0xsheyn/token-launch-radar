@@ -1,8 +1,8 @@
-// Token Radar's dashboard, radar-2, editorial rebuild. It reads window.RADAR (written beside
+// Token Radar's dashboard, curve-1, editorial rebuild. It reads window.RADAR (written beside
 // dashboard/ by main.ts) and renders the ranked board, a log-log scatter of TVL against implied
 // value, the farm verdicts priced from the model's own implied values, a filterable table, a
 // centred detail modal with the model's own inputs and the protocol's farm plan, and the sector
-// benchmarks the model was priced from. No network: every byte it shows is in data.js, and it
+// offsets the model was priced from. No network: every byte it shows is in data.js, and it
 // fetches nothing. Numbers are recomputed in the page and checked against board.json.
 (function () {
   'use strict';
@@ -45,19 +45,15 @@
   }
   // The model in one function: the page recomputes a row from the snapshot figures and checks the
   // number board.json carries, so the page's code and the board's data are visibly the same arithmetic.
-  function impliedOf(row, model) {
-    var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
-    var growthMult = 1 + (growth / 100) * model.growth_weight;
-    var age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
-    var maturity = model.maturity_floor + (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-    var chainMult = 1 + model.chain_step * Math.min(Math.max((row.chains || []).length - 1, 0), model.chain_cap);
-    return Math.max(1, Math.round(row.tvl_usd * row.sector_multiple * growthMult * maturity * chainMult));
+  function impliedOf(row, fit) {
+    var curve = Math.pow(10, fit.intercept + fit.slope * Math.log10(row.tvl_usd / fit.reference_tvl_usd));
+    return Math.max(1, Math.round(curve * row.sector_offset * row.factor_total));
   }
   /** How many of the board's rows the page recomputes exactly as board.json carries them. */
   function matchCount() {
     var n = 0;
     DATA.rows.forEach(function (r, i) {
-      if (r.rank === i + 1 && impliedOf(r, DATA.model) === r.implied_value_usd) n++;
+      if (r.rank === i + 1 && impliedOf(r, DATA.fit) === r.implied_value_usd) n++;
     });
     return n;
   }
@@ -164,8 +160,8 @@
   // Board-wide figures, all computed live from data.js: no number on the page is typed in by hand.
   var TOTAL_IMPLIED = DATA.rows.reduce(function (a, r) { return a + r.implied_value_usd; }, 0);
   var BOARD_TVL = DATA.rows.reduce(function (a, r) { return a + r.tvl_usd; }, 0);
-  var SECTORS_PRICED = (DATA.benchmarks || []).filter(function (b) { return b.live_count >= 3; }).length;
-  var CATEGORY_COUNT = (DATA.benchmarks || []).length;
+  var SECTORS_PRICED = (DATA.sector_offsets || []).filter(function (b) { return b.live_count >= 3; }).length;
+  var CATEGORY_COUNT = (DATA.sector_offsets || []).length;
   var SET_ASIDE_TOTAL = (DATA.set_aside || []).reduce(function (a, g) { return a + g.count; }, 0);
   var VERDICTS = { FARM: 0, THIN: 0, SKIP: 0 };
   DATA.rows.forEach(function (r) { if (r.economics) VERDICTS[r.economics.verdict]++; });
@@ -245,7 +241,7 @@
     return el('header', { class: 'top' },
       el('div', null,
         el('div', { class: 'brand', text: 'Token Radar.' }),
-        el('div', { class: 'kicker', text: 'TOKEN LAUNCH RADAR \u00b7 MODEL: RADAR-2 \u00b7 ' + DATA.live_size + ' LIVE COMPS' })
+        el('div', { class: 'kicker', text: 'TOKEN LAUNCH RADAR \u00b7 MODEL: CURVE-1 \u00b7 ' + DATA.live_size + ' LIVE COMPS' })
       ),
       el('div', { class: 'top-meta' },
         el('span', { text: 'Snapshot ' + DATA.as_of + ' \u00b7 DefiLlama protocols \u00b7 ' + DATA.board_size + ' protocols ranked' }),
@@ -256,7 +252,7 @@
 
   // The hero scatter: TVL against implied value on log-log axes, drawn by hand as one inline SVG.
   // Lime dots are this radar's estimates for the 200 board rows; grey dots are the live comps'
-  // market caps; the line is the global sector benchmark. No library, no network.
+  // market caps; the curve is the fitted size curve, sub-linear in TVL. No library, no network.
   function scatter() {
     var pts = DATA.rows.filter(function (r) { return r.tvl_usd > 0 && r.implied_value_usd > 0; }).map(function (r) { return { x: r.tvl_usd, y: r.implied_value_usd, live: false }; });
     DATA.live.forEach(function (r) { if (r.tvl_usd > 0 && r.mcap_usd !== null && r.mcap_usd > 0) pts.push({ x: r.tvl_usd, y: r.mcap_usd, live: true }); });
@@ -281,9 +277,14 @@
       parts.push('<line class="grid" x1="' + L + '" y1="' + gy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + gy.toFixed(1) + '"/>');
       parts.push('<text class="tick" x="' + (L - 6) + '" y="' + (gy + 4).toFixed(1) + '" text-anchor="end">' + fmtUsd(Math.pow(10, k)) + '</text>');
     }
-    var b0x = px(Math.pow(10, xMin)), b0y = py(DATA.global_benchmark * Math.pow(10, xMin));
-    var b1x = px(Math.pow(10, xMax)), b1y = py(DATA.global_benchmark * Math.pow(10, xMax));
-    parts.push('<line class="bench-line" x1="' + b0x.toFixed(1) + '" y1="' + b0y.toFixed(1) + '" x2="' + b1x.toFixed(1) + '" y2="' + b1y.toFixed(1) + '"/>');
+    var curvePts = [];
+    var i;
+    for (i = 0; i <= 60; i++) {
+      var lx = xMin + ((xMax - xMin) * i) / 60;
+      var yv = Math.pow(10, DATA.fit.intercept + DATA.fit.slope * (lx - Math.log10(DATA.fit.reference_tvl_usd)));
+      curvePts.push(px(Math.pow(10, lx)).toFixed(1) + ',' + py(yv).toFixed(1));
+    }
+    parts.push('<polyline class="bench-line" fill="none" points="' + curvePts.join(' ') + '"/>');
     pts.forEach(function (p) {
       parts.push('<circle class="' + (p.live ? 'dot-live' : 'dot') + '" cx="' + px(p.x).toFixed(1) + '" cy="' + py(p.y).toFixed(1) + '" r="' + (p.live ? 2.2 : 2.8) + '"/>');
     });
@@ -291,7 +292,7 @@
     return el('figure', { class: 'panel scatter-card' },
       el('figcaption', { text: 'HOW A LAUNCH IS PRICED' }),
       el('div', { html: parts.join('') }),
-      el('p', { class: 'fig-note', text: 'Lime dots are this radar\u2019s estimates for the ' + DATA.board_size + '. Grey dots are the ' + DATA.live_size + ' live comps\u2019 market caps. Line: the global benchmark, ' + DATA.global_benchmark + 'x TVL.' })
+      el('p', { class: 'fig-note', text: 'Lime dots are this radar\u2019s estimates for the ' + DATA.board_size + '. Grey dots are the ' + DATA.live_size + ' live comps\u2019 market caps. Curve: the fitted size curve, log10(mcap) = ' + DATA.fit.intercept + ' + ' + DATA.fit.slope + ' \u00d7 log10(TVL/$100M) — a tenfold TVL buys about ' + Math.pow(10, DATA.fit.slope).toFixed(1) + 'x the market cap.' })
     );
   }
 
@@ -301,9 +302,9 @@
         el('h1', null,
           el('span', { text: DATA.board_size + ' protocols record no token.' }),
           el('br'),
-          el('em', { text: 'The market\u2019s own sector multiples price them at ' + fmtUsd(TOTAL_IMPLIED) + '.' })
+          el('em', { text: 'The fitted size curve prices them at ' + fmtUsd(TOTAL_IMPLIED) + '.' })
         ),
-        el('p', { text: 'Every protocol the feed tracks that records no token and is nobody else\u2019s product, priced from the ones that do: a dollar of TVL is worth a different multiple in each sector, so the model takes each sector\u2019s own median FDV/TVL from the snapshot\u2019s trading protocols, then ranks what is still to come.' }),
+        el('p', { text: 'Every protocol the feed tracks that records no token and is nobody else\u2019s product, priced from the ones that do: market cap grows slower than TVL — the curve fitted to the snapshot\u2019s ' + DATA.fit.n + ' trading protocols says a tenfold TVL buys about ' + Math.pow(10, DATA.fit.slope).toFixed(1) + 'x the market cap — so each sector\u2019s offset around that curve prices what is still to come.' }),
         el('p', { class: 'note', text: 'Off-white is the snapshot\u2019s record. Lime is this radar\u2019s estimate. A protocol records no token when DefiLlama carries no CoinGecko id and no symbol for it; a protocol on the list may still have a token its record does not carry, so the radar says \u201crecords no token\u201d, never \u201chas none\u201d.' })
       ),
       scatter()
@@ -320,7 +321,7 @@
       cell('ON THIS BOARD', String(DATA.board_size), 'pre-token, nobody else\u2019s product'),
       cell('WATCHLIST COVERED', DATA.watchlist_size + ' / ' + DATA.watchlist_size, 'the house floor, at least'),
       cell('TVL ON THE BOARD', fmtUsd(BOARD_TVL), fmtUsd(TOTAL_IMPLIED) + ' implied'),
-      cell('SECTORS PRICED', String(SECTORS_PRICED), 'of ' + CATEGORY_COUNT + ' categories \u00b7 global ' + DATA.global_benchmark + 'x')
+      cell('SIZE CURVE', 'slope ' + DATA.fit.slope.toFixed(3), 'R\u00b2 ' + DATA.fit.r2.toFixed(3) + ' \u00b7 fitted on ' + DATA.fit.n + ' live tokens')
     );
   }
 
@@ -417,7 +418,7 @@
     return el('section', { class: 'panel hist' },
       el('h2', { text: 'How the board\u2019s implied values are distributed' }),
       el('div', { html: parts.join('') }),
-      el('p', { class: 'hist-note', text: 'Log scale, half a decade a bar; the middle of the board is ' + fmtUsd(MEDIAN_IMPLIED) + '. The long tail is the small early rows. Each row\u2019s table bar shows its own sensitivity range — TVL \u00b120% and growth \u00b10.25 — on a log scale from the smallest low to the largest high. Slice: what $1,000 deposited would get if 10% of the launch goes to depositors pro rata. Net: that slice minus the plan\u2019s gas and the forgone 4% T-bill yield, per plan and per hands-on hour.' })
+      el('p', { class: 'hist-note', text: 'Log scale, half a decade a bar; the middle of the board is ' + fmtUsd(MEDIAN_IMPLIED) + '. The long tail is the small early rows. Each row\u2019s table bar shows its own sensitivity range — the model\u2019s leave-one-out error, P10\u2013P90 — on a log scale from the smallest low to the largest high. Slice: what $1,000 deposited would get if 10% of the launch goes to depositors pro rata. Net: that slice minus the plan\u2019s gas and the forgone 4% T-bill yield, per plan and per hands-on hour.' })
     );
   }
 
@@ -435,18 +436,18 @@
     return el('span', { class: cls, text: String(rank) });
   }
 
-  // The sensitivity range bar: the row's own low-high range on one log scale shared by the
-  // whole board, with a dot at the implied value. The scale runs from the smallest low to the
-  // largest high across all 200 rows, so bars are comparable down the table.
+  // The sensitivity range bar: the row's own P10–P90 range on one log scale shared by the
+  // whole board, with a dot at the implied value. The scale runs from the smallest P10 to the
+  // largest P90 across all 200 rows, so bars are comparable down the table.
   var RANGE = (function () {
-    var lows = DATA.rows.map(function (r) { return Math.min(r.sensitivity.tvlShockUp, r.sensitivity.tvlShockDown, r.sensitivity.growthShockUp, r.sensitivity.growthShockDown); });
-    var highs = DATA.rows.map(function (r) { return Math.max(r.sensitivity.tvlShockUp, r.sensitivity.tvlShockDown, r.sensitivity.growthShockUp, r.sensitivity.growthShockDown); });
+    var lows = DATA.rows.map(function (r) { return r.sensitivity.p10; });
+    var highs = DATA.rows.map(function (r) { return r.sensitivity.p90; });
     return { lo: Math.log10(Math.min.apply(null, lows)), hi: Math.log10(Math.max.apply(null, highs)) };
   })();
   function rangeBar(r) {
     var s = r.sensitivity;
-    var low = Math.min(s.tvlShockUp, s.tvlShockDown, s.growthShockUp, s.growthShockDown);
-    var high = Math.max(s.tvlShockUp, s.tvlShockDown, s.growthShockUp, s.growthShockDown);
+    var low = s.p10;
+    var high = s.p90;
     function pos(v) { return Math.max(0, Math.min(100, ((Math.log10(v) - RANGE.lo) / (RANGE.hi - RANGE.lo)) * 100)); }
     var left = pos(low), width = Math.max(2, pos(high) - left), dot = pos(r.implied_value_usd);
     return el('div', { class: 'range' },
@@ -534,7 +535,7 @@
       // caption inside it: a caption reads as a row of the table it describes.
       el('p', { class: 'live-note' },
         el('b', { text: 'Token live: ' }),
-        'these protocols already trade, so their market cap is a fact, not a model. They are set aside from the pre-token ranking, and their FDV/TVL ratios price the sector benchmarks below.'),
+        'these protocols already trade, so their market cap is a fact, not a model. They are set aside from the pre-token ranking, and their market caps fit the size curve and price the sector offsets.'),
       el('div', { class: 'panel' },
       el('div', { class: 'table-wrap' },
         el('table', null,
@@ -575,36 +576,61 @@
 
   function modelTab() {
     var m = DATA.model;
-    var benchRows = (DATA.benchmarks || []).filter(function (b) { return b.live_count >= 3; }).sort(function (a, b) { return b.live_count - a.live_count; }).slice(0, 10);
-    var benchBody = el('tbody');
-    benchRows.forEach(function (b) {
-      benchBody.appendChild(el('tr', null,
+    var f = DATA.fit;
+    var V = DATA.validation;
+    var offRows = (DATA.sector_offsets || []).filter(function (b) { return b.live_count >= 3; }).sort(function (a, b) { return b.live_count - a.live_count; }).slice(0, 10);
+    var offBody = el('tbody');
+    offRows.forEach(function (b) {
+      offBody.appendChild(el('tr', null,
         el('td', { text: b.category }),
         el('td', { class: 'num', text: String(b.live_count) }),
-        el('td', { class: 'num', text: b.median_ratio === null ? 'n/a' : b.median_ratio.toFixed(3) + 'x' }),
-        el('td', { class: 'num', text: b.benchmark.toFixed(3) + 'x' })
+        el('td', { class: 'num', text: b.median_residual === null ? 'n/a' : (b.median_residual >= 0 ? '+' : '') + b.median_residual.toFixed(3) }),
+        el('td', { class: 'num', text: b.offset.toFixed(3) + 'x' })
       ));
     });
+    function variantRow(label, v, flat) {
+      return el('tr', null,
+        el('td', { text: label }),
+        el('td', { class: 'num' + (v.loo.median_miss < flat.loo.median_miss ? ' better' : ''), text: 'x' + v.loo.median_miss.toFixed(2) }),
+        el('td', { class: 'num' + (v.timesplit.median_miss < flat.timesplit.median_miss ? ' better' : ''), text: 'x' + v.timesplit.median_miss.toFixed(2) })
+      );
+    }
     return el('div', { class: 'model-grid' },
       el('section', { class: 'panel model-col' },
-        el('h2', { text: 'How radar-2 prices a launch' }),
-        el('p', { text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked. The sector multiple is priced from this snapshot: the median FDV/TVL of the live-token protocols in the same sector, shrunk toward the global median with a prior weight of ' + m.prior_weight + '. A sector with fewer than three live tokens carries no signal of its own and takes the global benchmark, so one live token never prices a whole sector.' }),
+        el('h2', { text: 'How curve-1 prices a launch' }),
+        el('p', { text: 'Every row is scored by one fitted function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked. The curve is ordinary least squares on the snapshot\u2019s ' + f.n + ' live tokens: log10(market cap) against log10(TVL / $100M). The slope is ' + f.slope + ', well under 1: a tenfold TVL buys about ' + Math.pow(10, f.slope).toFixed(1) + 'x the market cap, so the biggest protocols are not priced at a flat multiple of their TVL. Each sector then carries an offset around the curve: the median residual of its live tokens, shrunk toward 0 with a prior weight of ' + m.prior_weight + ' and clamped to [0.25, 4]. A sector with fewer than three live tokens carries no offset of its own and takes 1, so one live token never prices a whole sector.' }),
         el('div', { class: 'formula' },
-          'implied = round( tvl_usd \u00d7 sector \u00d7 (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 \u00d7 ' + m.growth_weight + ') \u00d7 (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' \u00d7 ' + m.maturity_range + ') \u00d7 (1 + ' + m.chain_step + ' \u00d7 min(chains - 1, ' + m.chain_cap + ')) )'
+          'implied = round( 10^( ' + f.intercept + ' + ' + f.slope + ' \u00d7 log10(TVL / $100M) ) \u00d7 sector_offset )'
         ),
-        el('p', { text: 'TVL and seven-day growth come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Maturity is in the price, not beside it: the multiplier rises from ' + m.maturity_floor + ' at listing to 1.0 over three years, so a protocol that has run longer with no token earns a fuller multiple. Sector multiples are clamped to [' + m.benchmark_floor + ', ' + m.benchmark_cap + ']; a sector with fewer than three live tokens takes the global benchmark of ' + DATA.global_benchmark + 'x.' }),
-        el('h3', { text: 'Sector benchmarks (live tokens, this snapshot)' }),
+        el('p', { text: 'TVL comes from the snapshot. Age, growth and chain count are not in the price: variant B, which multiplied the curve by the old growth, maturity and chain factors, was tested and rejected — it loses to this variant on both backtests, and the comparison on the right shows it. R\u00b2 is ' + f.r2 + ': TVL alone explains about ' + Math.round(f.r2 * 100) + '% of the spread in log market cap, and the rest is the sector offset and the error the sensitivity range shows.' }),
+        el('h3', { text: 'Sector offsets (live tokens, this snapshot)' }),
         el('div', { class: 'table-wrap' },
           el('table', { class: 'bench' },
-            el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Sector' }), el('th', { scope: 'col', text: 'Live tokens' }), el('th', { scope: 'col', text: 'Median FDV/TVL' }), el('th', { scope: 'col', text: 'Benchmark used' }))),
-            benchBody
+            el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Sector' }), el('th', { scope: 'col', text: 'Live tokens' }), el('th', { scope: 'col', text: 'Median residual (log10)' }), el('th', { scope: 'col', text: 'Offset used' }))),
+            offBody
           )
         ),
         el('p', { class: 'sub', text: 'The early radar is every pre-token protocol below the watchlist floor, by TVL, and the live-token protocols are set aside with their market caps shown. A protocol below the floor is no worse a subject than one on it: the floor is where the reading started, not where it stops.' })
       ),
       el('section', { class: 'panel model-col' },
-        el('h2', { text: 'What this model does not do' }),
-        el('p', { text: 'The model is fitted on this snapshot\u2019s own live tokens, and the Method and backtest tab tests it against them — blind, leave-one-out, and on a time split by listing date. But read the Limits there first: the ground truth is today\u2019s market cap, not the price at launch, and the split is by listing date, not a replay of history. The implied values are the snapshot\u2019s own sector multiples applied to its own TVLs; the backtest says how far those multiples miss when they are asked to predict a token that already trades — and on this snapshot, they miss by about as much as one global number does.' }),
+        el('h2', { text: 'Variant A won, variant B lost — both shown' }),
+        el('div', { class: 'table-wrap' },
+          el('table', { class: 'bench' },
+            el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Variant' }), el('th', { scope: 'col', text: 'LOO median miss' }), el('th', { scope: 'col', text: 'Time-split median miss' }))),
+            el('tbody', null,
+              variantRow('A: curve + sector offset (selected)', V.variant_a, V),
+              variantRow('B: A \u00d7 capped growth, maturity, chain factors', V.variant_b, V),
+              el('tr', null,
+                el('td', { text: 'Flat benchmark (global median mcap/TVL)' }),
+                el('td', { class: 'num', text: 'x' + V.loo.flat.median_miss.toFixed(2) }),
+                el('td', { class: 'num', text: 'x' + V.timesplit.flat.median_miss.toFixed(2) })
+              )
+            )
+          )
+        ),
+        el('p', { text: 'The growth, maturity and chain factors add variance without signal: variant B misses further than variant A on the leave-one-out test (x' + V.variant_b.loo.median_miss.toFixed(2) + ' vs x' + V.variant_a.loo.median_miss.toFixed(2) + ') and on the time split (x' + V.variant_b.timesplit.median_miss.toFixed(2) + ' vs x' + V.variant_a.timesplit.median_miss.toFixed(2) + '), so the board uses A. The selection is by the leave-one-out median miss, computed at run time from this snapshot — a tie would go to A, the simpler variant.' }),
+        el('h3', { text: 'What this model does not do' }),
+        el('p', { text: 'The model is fitted on this snapshot\u2019s own live tokens, and the Method and backtest tab tests it against them — blind, leave-one-out, and on a time split by listing date. But read the Limits there first: the ground truth is today\u2019s market cap, not the price at launch, and the split is by listing date, not a replay of history. The curve earns its error bars against one global number, but the bars are still wide: half the predictions land within ' + V.loo.model.band_50x.toFixed(2) + 'x of the truth leave-one-out, and four in five within ' + V.loo.model.band_80x.toFixed(2) + 'x.' }),
         el('h3', { text: 'How the verdict is earned' }),
         el('p', { text: 'FARM: the slice beats gas and the forgone 4% T-bill yield — the net is positive after every cost. THIN: the slice beats the gas but not the forgone yield — worth it only if the fees fall or the slice grows. SKIP: the slice does not even beat the gas.' }),
         el('p', { class: 'sub', text: 'On this board: ' + VERDICTS.FARM + ' FARM \u00b7 ' + VERDICTS.THIN + ' THIN \u00b7 ' + VERDICTS.SKIP + ' SKIP. The counts follow the gas above, not a quota: the top rows by implied value are often SKIP, because a $1,000 deposit is a thin slice of a very large TVL.' }),
@@ -614,7 +640,7 @@
           el('li', { text: 'Gas: the plan\u2019s whole gas over the hold — $3 for the first transaction, $8 to set the position up ($4 when the capital is under $150), $2 a week for the weekly action — ' + fmtMoney(GAS_MIN) + ' to ' + fmtMoney(GAS_MAX) + ' across the board, by capital and hold. Each row\u2019s own total is in its detail view.' }),
           el('li', { text: 'Forgone: the 4% T-bill yield on the $1,000 over the 30 days the plan holds it — $3.29.' }),
           el('li', { text: 'Hands-on: the plan\u2019s own step times added up — 5 minutes to set up the wallet, 15 to place the position, 10 minutes a week for the weekly action over the hold, 10 to check the rewards page, 5 to log it.' }),
-          el('li', { text: 'Sensitivity: the implied value under a TVL shock of \u00b120% and a growth-multiplier shock of \u00b10.25, sector, maturity and chain held. A wide range means the launch value is fragile.' })
+          el('li', { text: 'Sensitivity: the model\u2019s own leave-one-out error — the P10\u2013P90 range of log10(actual / predicted) over the ' + V.live_n + ' live tokens, priced around each row\u2019s implied value. A wide range means the model itself misses widely on tokens like this one.' })
         )
       )
     );
@@ -624,8 +650,8 @@
   // out-of-sample scatter, and the limits. Every number is read from
   // data.js (computed at run time from the snapshot), never typed in here —
   // including the verdict, which is computed, not asserted: on this snapshot
-  // radar-2 does not beat the flat benchmark on the median miss, and the tab
-  // says so.
+  // curve-1 beats the flat benchmark on the median miss on both tests, and
+  // the tab says so — and it also says the previous model did not.
   function backtestTab() {
     var V = DATA.validation;
     if (!V) {
@@ -661,7 +687,7 @@
               el('th', { scope: 'col', text: 'Within 3x' }),
               el('th', { scope: 'col', text: 'Band 50%' }),
               el('th', { scope: 'col', text: 'Band 80%' }))),
-            el('tbody', null, metricRow('Radar-2', a, b), metricRow('Flat benchmark', b, a))
+            el('tbody', null, metricRow('Curve-1', a, b), metricRow('Flat benchmark', b, a))
           )
         )
       );
@@ -716,15 +742,15 @@
     return el('div', { class: 'backtest' },
       el('section', { class: 'panel bt-panel' },
         el('h2', { text: 'How the model is tested' }),
-        el('p', { text: 'Radar-2 is fitted on this snapshot\u2019s live tokens: the sector benchmarks are the medians of the live tokens\u2019 market-cap-to-TVL ratios. The backtest asks whether those benchmarks predict a token\u2019s market cap at all — the same function that scores the board, pointed at tokens that already trade.' }),
-        el('p', { text: 'Leave-one-out (blind): all ' + V.live_n + ' live tokens, each predicted with the sector benchmarks recomputed without it — no token prices itself. The flat benchmark is the same test with one number instead of a model: the global median market-cap-to-TVL ratio times the token\u2019s TVL.' }),
-        el('p', { text: 'Time-split: the benchmarks are fitted on the ' + V.timesplit.fit_n + ' live tokens listed before ' + V.split_date + ' and tested on the ' + V.timesplit.test_n + ' listed in 2024 or later. The ' + V.timesplit.excluded_n + ' live tokens with no listing date cannot be placed on either side and are excluded from the split.' }),
+        el('p', { text: 'Curve-1 is fitted on this snapshot\u2019s live tokens: a size curve through the ' + V.live_n + ' market caps, with a sector offset per category. The backtest asks whether that curve predicts a token\u2019s market cap at all — the same function that scores the board, pointed at tokens that already trade.' }),
+        el('p', { text: 'Leave-one-out (blind): all ' + V.live_n + ' live tokens, each predicted with the curve and the offsets refitted without it — no token prices itself. The flat benchmark is the same test with one number instead of a model: the global median market-cap-to-TVL ratio times the token\u2019s TVL.' }),
+        el('p', { text: 'Time-split: the curve and the offsets are fitted on the ' + V.timesplit.fit_n + ' live tokens listed before ' + V.split_date + ' and tested on the ' + V.timesplit.test_n + ' listed in 2024 or later. The ' + V.timesplit.excluded_n + ' live tokens with no listing date cannot be placed on either side and are excluded from the split.' }),
         el('p', { text: 'Ground truth is the market cap today, from the snapshot — not the price at launch, which no snapshot carries. The split is by listing date, not a replay of history. A miss is max(predicted / actual, actual / predicted): a miss of 3 means three times too high or three times too low. The band is the factor that covers a share of the misses: the 50% band is the median miss, the 80% band the 80th percentile.' }),
-        el('p', null, el('b', { text: 'On the median miss, radar-2 ' + looVerdict + ' the flat benchmark leave-one-out (' + miss(V.loo.model.median_miss) + ' vs ' + miss(V.loo.flat.median_miss) + ') and ' + tsVerdict + ' it on the time split (' + miss(V.timesplit.model.median_miss) + ' vs ' + miss(V.timesplit.flat.median_miss) + '). ' }),
-          'The sector multiples and the growth, maturity and chain factors do not add predictive power over one global number on this snapshot — the table shows it, so the board is read as a ranking of the sector multiples, not as a prediction that has earned its error bars.')
+        el('p', null, el('b', { text: 'On the median miss, curve-1 ' + looVerdict + ' the flat benchmark leave-one-out (' + miss(V.loo.model.median_miss) + ' vs ' + miss(V.loo.flat.median_miss) + ') and ' + tsVerdict + ' it on the time split (' + miss(V.timesplit.model.median_miss) + ' vs ' + miss(V.timesplit.flat.median_miss) + '). ' }),
+          'The curve earns its error bars against one global number — but the bars are still wide: half the predictions land within ' + miss(V.loo.model.band_50x) + ' of the truth leave-one-out, and four in five within ' + miss(V.loo.model.band_80x) + '. The previous model, radar-2 — sector medians times growth, maturity and chain factors — did not beat the flat benchmark on either test (leave-one-out x5.15 vs x5.07; time-split x5.46 vs x5.20); the fitted curve replaces it.')
       ),
-      resultTable('Leave-one-out (blind)', 'All ' + V.loo.n + ' live tokens. Each predicted with the benchmarks recomputed without it.', V.loo.model, V.loo.flat),
-      resultTable('Time-split', 'Benchmarks fitted on the ' + V.timesplit.fit_n + ' tokens listed before ' + V.split_date + '; tested on the ' + V.timesplit.test_n + ' listed in 2024 or later.', V.timesplit.model, V.timesplit.flat),
+      resultTable('Leave-one-out (blind)', 'All ' + V.loo.n + ' live tokens. Each predicted with the curve and the offsets refitted without it.', V.loo.model, V.loo.flat),
+      resultTable('Time-split', 'Curve and offsets fitted on the ' + V.timesplit.fit_n + ' tokens listed before ' + V.split_date + '; tested on the ' + V.timesplit.test_n + ' listed in 2024 or later.', V.timesplit.model, V.timesplit.flat),
       el('section', { class: 'panel bt-panel oos-card' },
         el('h2', { text: 'Out of sample: the ' + V.timesplit.test_n + ' test tokens' }),
         oosScatter(),
@@ -735,9 +761,9 @@
         el('ul', { class: 'assumptions' },
           el('li', { text: 'One day of data: the snapshot is ' + DATA.as_of + '. A model fitted on one day cannot say how the next day\u2019s listings will price.' }),
           el('li', { text: 'Ground truth is today\u2019s market cap. A token\u2019s launch price is not in the snapshot, so the backtest tests prediction of today\u2019s value, not of the launch.' }),
-          el('li', { text: 'Small samples: ' + V.live_n + ' tokens leave-one-out, ' + V.timesplit.fit_n + ' fitted and ' + V.timesplit.test_n + ' tested in the split. One large token moving changes the medians.' }),
+          el('li', { text: 'Small samples: ' + V.live_n + ' tokens leave-one-out, ' + V.timesplit.fit_n + ' fitted and ' + V.timesplit.test_n + ' tested in the split. One large token moving changes the fit.' }),
           el('li', { text: V.timesplit.excluded_n + ' live tokens carry no listing date and are excluded from the time split.' }),
-          el('li', { text: 'The sector benchmarks for the test tokens come from the fit set only — a test token\u2019s own category may have fewer than three fit tokens and fall back to the global benchmark.' }),
+          el('li', { text: 'The curve and the sector offsets for the test tokens come from the fit set only — a test token\u2019s own category may have fewer than three fit tokens and fall back to offset 1.' }),
           el('li', { text: 'Read the band, not the point: half the predictions land within ' + miss(V.timesplit.model.band_50x) + ' of the truth on the time split, and four in five within ' + miss(V.timesplit.model.band_80x) + '.' })
         )
       )
@@ -756,12 +782,9 @@
     dialog.textContent = '';
     var steps = farmSteps(row);
     var e = row.economics;
-    var base = Math.round(row.tvl_usd * row.sector_multiple);
-    var recomputed = impliedOf(row, DATA.model);
-    var bench = (DATA.benchmarks || []).filter(function (b) { return b.category === (row.category || 'Other'); })[0];
+    var recomputed = impliedOf(row, DATA.fit);
+    var off = (DATA.sector_offsets || []).filter(function (b) { return b.category === (row.category || 'Other'); })[0];
     var s = row.sensitivity;
-    var low = Math.min(s.tvlShockUp, s.tvlShockDown, s.growthShockUp, s.growthShockDown);
-    var high = Math.max(s.tvlShockUp, s.tvlShockDown, s.growthShockUp, s.growthShockDown);
     var chainsText = (row.chains && row.chains.length ? row.chains.join(', ') : 'an unnamed chain');
 
     var head = el('div', { class: 'detail-head' },
@@ -775,20 +798,19 @@
 
     var bigNums = el('div', { class: 'big-nums' },
       el('div', null, el('div', { class: 'big-label', text: 'IMPLIED VALUE' }), el('div', { class: 'big-value', id: 'modal-implied', text: fmtUsd(row.implied_value_usd) })),
-      el('div', null, el('div', { class: 'big-label', text: 'SENSITIVITY RANGE' }), el('div', { class: 'big-value', text: fmtUsd(low) + ' \u2013 ' + fmtUsd(high) })),
+      el('div', null, el('div', { class: 'big-label', text: 'SENSITIVITY RANGE (P10\u2013P90)' }), el('div', { class: 'big-value', text: fmtUsd(s.p10) + ' \u2013 ' + fmtUsd(s.p90) })),
       el('div', null, el('div', { class: 'big-label', text: 'AIRDROP SLICE / $1K' }), el('div', { class: 'big-value', text: e ? fmtMoney(e.slice_usd) : 'n/a' })),
       el('div', null, el('div', { class: 'big-label', text: 'VERDICT' }), e ? verdictTag(e.verdict) : el('span', { text: 'n/a' }))
     );
 
-    // The TVL slider recomputes the implied value live from the row's own factors: the sector,
-    // growth, maturity and chain multipliers are held, only the TVL moves. The slice per $1K
-    // does not move with TVL alone — the launch value and the TVL scale together — so the
-    // economics strip below stays put and the note says so.
+    // The TVL slider recomputes the implied value live from the row's own curve and offset: the
+    // sector offset is held, only the TVL moves. The economics strip below stays priced at the
+    // recorded TVL.
     var sliderOut = el('div', { class: 'slider-out', text: 'TVL +0% \u2192 implied ' + fmtUsd(row.implied_value_usd) });
     var slider = el('input', { type: 'range', min: '-20', max: '20', step: '1', value: '0', 'aria-label': 'Move the TVL by up to 20 percent' });
     slider.addEventListener('input', function () {
       var d = Number(slider.value);
-      var moved = impliedOf({ tvl_usd: row.tvl_usd * (1 + d / 100), sector_multiple: row.sector_multiple, change_7d: row.change_7d, age_days: row.age_days, chains: row.chains }, DATA.model);
+      var moved = impliedOf({ tvl_usd: row.tvl_usd * (1 + d / 100), sector_offset: row.sector_offset, factor_total: row.factor_total }, DATA.fit);
       var out = document.getElementById('modal-implied');
       if (out) out.textContent = fmtUsd(moved);
       sliderOut.textContent = 'TVL ' + (d >= 0 ? '+' : '') + d + '% \u2192 implied ' + fmtUsd(moved);
@@ -796,23 +818,46 @@
     var sliderSection = el('section', { class: 'detail-section' },
       el('h3', { text: 'What if the TVL moves?' }),
       el('div', { class: 'slider-row' }, slider, sliderOut),
-      el('p', { class: 'sub', text: 'The sector, growth, maturity and chain multipliers are held; only the TVL moves \u00b120%. The slice per $1K does not move with TVL alone — the launch value and the TVL scale together.' })
+      el('p', { class: 'sub', text: 'The curve and the sector offset are held; only the TVL moves \u00b120%. The economics below stay priced at the recorded TVL.' })
     );
 
-    var built = el('section', { class: 'detail-section' },
-      el('h3', { text: 'How the value is built' }),
-      el('div', { class: 'equation' },
-        el('div', null, el('span', { text: 'TVL on record' }), el('b', { class: 'num', text: fmtUsd(row.tvl_usd) })),
-        el('div', null, el('span', { text: 'Sector multiple (' + (row.category || 'Other') + ')' + (bench && bench.live_count < 3 ? ' — takes the global benchmark: fewer than three live tokens' : '') }), el('b', { class: 'num', text: String(row.sector_multiple) + 'x' })),
-        el('div', null, el('span', { text: 'Base value (TVL \u00d7 sector)' }), el('b', { class: 'num', text: fmtUsd(base) })),
+    var eqRows = [
+      el('div', null, el('span', { text: 'TVL on record' }), el('b', { class: 'num', text: fmtUsd(row.tvl_usd) })),
+      el('div', null, el('span', { text: 'Curve value at this TVL (10^(' + DATA.fit.intercept + ' + ' + DATA.fit.slope + ' \u00d7 log10(TVL/$100M)))' }), el('b', { class: 'num', text: fmtUsd(row.curve_value_usd) })),
+      el('div', null, el('span', { text: 'Sector offset (' + (row.category || 'Other') + ')' + (off && off.live_count < 3 ? ' — takes offset 1: fewer than three live tokens' : '') }), el('b', { class: 'num', text: String(row.sector_offset) + 'x' }))
+    ];
+    if (DATA.variant_selected === 'b') {
+      eqRows.push(
         el('div', null, el('span', { text: 'Seven-day growth' }), el('b', { class: 'num', text: fmtPct(row.change_7d) })),
         el('div', null, el('span', { text: 'Growth multiplier' }), el('b', { class: 'num', text: String(row.growth_multiplier) })),
         el('div', null, el('span', { text: 'Age with no token' }), el('b', { class: 'num', text: fmtAge(row.age_days) })),
         el('div', null, el('span', { text: 'Maturity multiplier' }), el('b', { class: 'num', text: String(row.maturity_multiplier) })),
         el('div', null, el('span', { text: 'Chain multiplier (' + (row.chains || []).length + ' chains)' }), el('b', { class: 'num', text: String(row.chain_multiplier) })),
-        el('div', { class: 'total' }, el('span', { text: 'Implied value (recomputed in this page)' }), el('b', { class: 'num', text: fmtUsd(recomputed) + (recomputed === row.implied_value_usd ? ' \u2713 matches the board' : ' \u2014 differs from the board') }))
-      ),
+        el('div', null, el('span', { text: 'Factor total (capped [0.67, 1.5])' }), el('b', { class: 'num', text: String(row.factor_total) + 'x' }))
+      );
+    } else {
+      eqRows.push(
+        el('div', null, el('span', { text: 'Growth, maturity and chain factors' }), el('b', { class: 'num', text: 'not used — variant A is curve + sector offset only' }))
+      );
+    }
+    eqRows.push(
+      el('div', { class: 'total' }, el('span', { text: 'Implied value (recomputed in this page)' }), el('b', { class: 'num', text: fmtUsd(recomputed) + (recomputed === row.implied_value_usd ? ' \u2713 matches the board' : ' \u2014 differs from the board') }))
+    );
+
+    var built = el('section', { class: 'detail-section' },
+      el('h3', { text: 'How the value is built' }),
+      el('div', { class: 'equation' }, eqRows),
       el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. This is an estimate, not a price, and the protocol records no token: that is the snapshot\u2019s record, not proof it has none.' })
+    );
+
+    var sens = el('section', { class: 'detail-section' },
+      el('h3', { text: 'Sensitivity: the model\u2019s own error' }),
+      el('div', { class: 'equation' },
+        el('div', null, el('span', { text: 'P10 \u2013 P90 (four in five land inside)' }), el('b', { class: 'num', text: fmtUsd(s.p10) + ' \u2013 ' + fmtUsd(s.p90) })),
+        el('div', null, el('span', { text: 'P25 \u2013 P75 (half land inside)' }), el('b', { class: 'num', text: fmtUsd(s.p25) + ' \u2013 ' + fmtUsd(s.p75) })),
+        el('div', null, el('span', { text: 'Implied value' }), el('b', { class: 'num', text: fmtUsd(row.implied_value_usd) }))
+      ),
+      el('p', { class: 'sub', text: 'The range is the leave-one-out error of the fitted curve: log10(actual / predicted) over the ' + DATA.validation.live_n + ' live tokens. It is not a confidence interval on this protocol — it is how far the model misses on tokens it has seen.' })
     );
 
     var econ = el('section', { class: 'detail-section' },
@@ -854,6 +899,7 @@
     dialog.appendChild(bigNums);
     dialog.appendChild(sliderSection);
     dialog.appendChild(built);
+    dialog.appendChild(sens);
     dialog.appendChild(econ);
     dialog.appendChild(ticket);
     dialog.appendChild(plan);

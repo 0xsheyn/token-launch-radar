@@ -1,4 +1,4 @@
-// A working token-radar-01 entry (Node 22, standard library only), model radar-2.
+// A working token-radar-01 entry (Node 22, standard library only), model curve-1.
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores every
 // pre-token protocol with the model in lib/model.ts, writes the ranked board to /output/board.json, and
@@ -7,9 +7,9 @@
 //
 // The dashboard is a static page, no framework and no network: dashboard/index.html, dashboard/app.css
 // and dashboard/app.js read /output/data.js, which this program writes from the same board. The model
-// prices each sector from the snapshot's own live-token FDV/TVL medians, so the same code re-scores a
-// future snapshot with no hand-kept list of names; the page recomputes every row it shows, so the
-// screenshots, the code and the board agree.
+// fits a size curve to the snapshot's own live tokens, so the same code re-scores a future snapshot
+// with no hand-kept list of names; the page recomputes every row it shows, so the screenshots, the
+// code and the board agree.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
@@ -88,6 +88,7 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEX
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
+    `token radar: curve-1 fit: log10(mcap) = ${radar.fit.intercept} + ${radar.fit.slope} x log10(TVL/$100M), R2 ${radar.fit.r2} on ${radar.fit.n} live tokens; variant ${radar.validation.variant_selected} selected (A: curve + sector offset)\n` +
     `token radar: backtest: leave-one-out median miss x${radar.validation.loo.model.median_miss} vs flat x${radar.validation.loo.flat.median_miss}; time-split x${radar.validation.timesplit.model.median_miss} vs flat x${radar.validation.timesplit.flat.median_miss}\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

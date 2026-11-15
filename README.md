@@ -30,42 +30,61 @@ at `/input/snapshot.json`, scores every pre-token protocol, and writes:
 - `data.js` — the same board in compact form for the dashboard.
 - `dashboard/` — a static page (no network, no framework): dark-blue
   editorial theme with a lime accent; hero with a log-log scatter of TVL
-  against implied value; a six-stat strip; top-5 cards; five tabs
+  against implied value and the fitted size curve; a six-stat strip; top-5 cards; five tabs
   (pre-token board, live-token, set aside, model & calibration, method and
   backtest); sortable
   and filterable board with a sensitivity range bar, an airdrop slice per
   $1,000 and a FARM / THIN / SKIP verdict per row; a centred detail modal
-  for every protocol with a TVL slider, the value breakdown, farm
-  economics and the farm plan; and the model with its sector benchmarks.
+  for every protocol with a TVL slider, the value breakdown, the
+  sensitivity range, farm
+  economics and the farm plan; and the model with its sector offsets and
+  the variant comparison.
 - `screenshots/` — three screenshots of the dashboard: the board, a protocol
   detail view, and a filtered view.
 - `dossier.json` — built with `buildDossier` from `vendor/makefun-board.ts`
   (the kit's library, copied unchanged).
 
-## The model (radar-2)
+## The model (curve-1)
 
-Implied value follows only from the snapshot's own figures, in four factors.
-No protocol name is special-cased; the same function scores every row, and
-the sector benchmark is computed from the snapshot itself at run time, so the
-same code re-scores a future snapshot with no hand-kept list.
+Implied value is a fitted size curve, not a sector multiple. The
+snapshot's 128 live tokens are fitted by ordinary least squares on
+log10(market cap) against log10(TVL / $100M), and each sector carries an
+offset around that curve. No protocol name is special-cased; the same
+function scores every row, and the curve, the offsets and the variant
+choice are all computed from the snapshot itself at run time, so the same
+code re-scores a future snapshot with no hand-kept list and no hard-coded
+coefficient.
 
 ```
-implied = round( tvl_usd x sector
-               x (1 + clamp(change_7d, -60, 120) / 100 x 0.5)
-               x (0.6 + min(age_days, 1095) / 1095 x 0.4)
-               x (1 + 0.04 x min(chains - 1, 4)) )
+log10(mcap) = 7.202797 + 0.522266 x log10(TVL / $100M)     R² 0.1939, n = 128
+implied     = round( 10^(7.202797 + 0.522266 x log10(TVL / $100M)) x sector_offset )
 ```
 
-- **sector** — the sector's FDV/TVL benchmark: the median market-cap-to-TVL
-  ratio of the live-token protocols in the same category, shrunk toward the
-  global median with a prior weight of 8, clamped to [0.05, 1.00]. A sector
-  with fewer than three live tokens takes the global benchmark — one live
-  token's ratio must not price a whole sector.
-- **growth** — the protocol's 7-day TVL change, clamped to [-60%, +120%].
-- **maturity** — how long it has run with no token on record, from
-  `listed_at`; an unlisted age uses 365 days.
-- **chains** — how many chains it runs on: 1.00 for one chain, up to 1.16
-  for five or more.
+- **curve** — the fitted size curve. The slope is well under 1: a tenfold
+  TVL buys about 3.3x the market cap, so the biggest protocols are not
+  priced at a flat multiple of their TVL. At TVL $100M the curve reads
+  $15.95M.
+- **sector_offset** — the sector's offset around the curve: the median
+  log10 residual of its live tokens, shrunk toward 0 with a prior weight
+  of 8 (offset = 10^(median residual x n / (n + 8))), clamped to
+  [0.25, 4]. A sector with fewer than three live tokens takes offset 1 —
+  one live token's residual must not price a whole sector. On this
+  snapshot the offsets run from 0.589 (Liquid Staking) to 1.784
+  (Canonical Bridge); 14 of the 34 categories carry an offset of their
+  own.
+
+Two variants were tested, and the variant with the better leave-one-out
+median miss is the one the board uses:
+
+- **Variant A (selected): curve + sector offset.** Leave-one-out median
+  miss x3.62, time-split x2.91.
+- **Variant B (rejected): A times the growth, maturity and chain factors**
+  of the previous model, with their product capped to [0.67, 1.5].
+  Leave-one-out median miss x3.85, time-split x3.09 — worse on both
+  tests. The factors add variance without signal, so the board does not
+  use them. Both variants' numbers are in the dashboard's Model &
+  calibration tab and in `data.js` (`validation.variant_a` /
+  `variant_b`); the rejected variant is shown, not hidden.
 
 A protocol "records no token" when the snapshot carries no market cap, no
 CoinGecko id and no symbol for it. That is DefiLlama's record, not proof it
@@ -73,68 +92,72 @@ has none. Live-token protocols are set aside on their own tab at their market
 caps, never mixed into the ranking. Implied value is a model, not a promise
 and not a price.
 
+Top of the board on this snapshot: Steakhouse Financial $90.1M, Gauntlet
+$67.4M, Veda $67.1M, USDD $50.7M, Nonce Capital $37.5M; the 200 rows sum
+to $2.09B implied, median $7.1M.
+
 ## Sensitivity
 
 Every row of `board.json` carries a `sensitivity` object next to its
 implied value. It answers one question the point estimate cannot: how far
-does this row's launch value move when the inputs it leans on turn against
-it?
+does the model itself miss on tokens like this one?
 
 ```
 sensitivity: {
-  tvlShockUp, tvlShockDown,       // TVL 20% higher / lower at launch
-  growthShockUp, growthShockDown, // growth multiplier 0.25 hotter / colder
-  sensitivitySpreadPct            // the four shocks' spread, in %
+  p10, p25, p75, p90,   // implied x the leave-one-out residual quantiles
+  spread_pct            // (p90 - p10) / implied, in %
 }
 ```
 
-Two of the model's four factors move fast around a launch, so those are the
-two that get shaken. A protocol's TVL can jump on one large deposit or fall
-on one large withdrawal, and a single week's change is the noisiest number
-the snapshot carries. The sector benchmark, the protocol's age and its chain
-count move slowly by comparison, so the shocks hold those three still and
-move only TVL and the growth multiplier.
+The range is not a shock to the row's inputs. It is the model's own
+out-of-sample error: the leave-one-out residuals of the selected variant,
+log10(actual / predicted) over the 128 live tokens. The 10th, 25th, 75th
+and 90th percentiles of those residuals (linear interpolation) are the
+linear factors the range is priced from — on this snapshot 0.0769,
+0.2920, 4.1058 and 8.5527. A row's P10–P90 is its implied value times
+0.0769 and 8.5527; its P25–P75 times 0.2920 and 4.1058.
 
-The growth shocks are clamped to [0.5, 1.8]. Below 0.5 the multiplier would
-mean a shrinkage worse than the growth floor already allows, and above 1.8
-it would mean a weekly run hotter than the growth cap already allows, so
-neither end of the clamp invents a world the model itself refuses to price.
-
-Read `sensitivitySpreadPct` as the row's fragility: the distance between
-the highest and the lowest shocked value, as a percentage of the row's own
-implied value. A row whose shocks span 40% nearly halves on a bad week or
-a big withdrawal; a row at 15% barely moves. Two rows can sit next to each
-other with the same implied value and very different spreads — the spread
-is what tells them apart when the launch does not go as planned.
+The range is wide, and it is shown wide rather than shrunk: the median
+miss is above 3x, so a row's P10–P90 spans roughly a factor of 111. Read
+`spread_pct` as the row's fragility: the distance between the P90 and the
+P10, as a percentage of the row's own implied value. Two rows can sit next
+to each other with the same implied value and very different spreads — the
+spread is what tells them apart when the launch does not go as planned.
 
 Sensitivity changes nothing about the ranking. The board sorts on implied
 value exactly as before, every implied value is the same number it was, and
-the shocks are reported alongside so a reader can carry the range in their
-head instead of a single number. The dashboard shows the range too: a
-range bar on every table row and a Sensitivity section in the protocol
-detail modal, labelled as the TVL ±20% and growth ±0.25 shocks — not a
-confidence interval.
+the range is reported alongside so a reader can carry the model's own
+error instead of a single number. The dashboard shows the range too: a
+range bar on every table row (P10–P90, dot at the implied value) and a
+Sensitivity section in the protocol detail modal (P10–P90 and P25–P75) —
+labelled as the model's leave-one-out error, not a confidence interval.
+The TVL slider in the modal still moves the TVL ±20% through the fitted
+curve; it is a what-if on the input, not the sensitivity range.
 
 ## Backtest
 
-The dashboard's Method and backtest tab tests radar-2 against the
+The dashboard's Method and backtest tab tests curve-1 against the
 snapshot's own live tokens, computed at run time — nothing here is typed
 in by hand. A miss is max(predicted / actual, actual / predicted).
 
 - **Leave-one-out (blind):** all 128 live tokens, each predicted with the
-  sector benchmarks recomputed without it. Radar-2: median miss x5.15,
-  22.7% within 2x, 32.8% within 3x. Flat benchmark (global median
-  mcap/TVL x TVL): x5.07, 28.1%, 35.2%.
-- **Time-split:** benchmarks fitted on the 44 live tokens listed before
-  2024-01-01, tested on the 51 listed in 2024 or later; 33 live tokens
-  carry no listing date and are excluded. Radar-2: median miss x5.46,
-  27.5% within 2x, 35.3% within 3x. Flat: x5.20, 25.5%, 35.3%.
+  curve and the offsets refitted without it. Curve-1: median miss x3.62,
+  33.6% within 2x, 46.1% within 3x, 80% band x9.95. Flat benchmark (global
+  median mcap/TVL x TVL): x5.07, 28.1%, 35.2%, x14.77.
+- **Time-split:** curve and offsets fitted on the 44 live tokens listed
+  before 2024-01-01, tested on the 51 listed in 2024 or later; 33 live
+  tokens carry no listing date and are excluded. Curve-1: median miss
+  x2.91, 35.3% within 2x, 51.0% within 3x, 80% band x10.63. Flat: x5.20,
+  25.5%, 35.3%, x11.07.
 
-On the median miss, radar-2 does not beat the flat benchmark on either
-test. The sector multiples and the growth, maturity and chain factors do
-not add predictive power over one global number on this snapshot, and the
-dashboard says so. Ground truth is the market cap today, not the price
-at launch, which no snapshot carries.
+On the median miss, curve-1 beats the flat benchmark on both tests — the
+first version of this radar to do so. The previous model, radar-2
+(sector medians times growth, maturity and chain factors), did not: it
+missed x5.15 leave-one-out and x5.46 on the time split, against flat x5.07
+and x5.20. Variant B (curve times the capped growth, maturity and chain
+factors) also loses to variant A on both tests (x3.85 and x3.09), which is
+why the board uses variant A. Ground truth is the market cap today, not
+the price at launch, which no snapshot carries.
 
 ## Farm verdicts
 
@@ -154,11 +177,14 @@ net     = slice - gas - forgone
 - **THIN** — beats the fees only: net <= 0 but slice - gas > 0.
 - **SKIP** — does not beat the fees: slice - gas <= 0.
 
-On this snapshot the board splits FARM 48 / THIN 36 / SKIP 116, including
-6 of the top 10 as SKIP — the biggest implied values are not the best
-farms once the whole plan's gas is counted. The verdict never changes the
-ranking; it only prices the farm. The definitions, the gas accounting and
-the split are stated in the dashboard's Model & calibration tab.
+On this snapshot the board splits FARM 146 / THIN 13 / SKIP 41, including
+all 10 of the top 10 as SKIP — the biggest implied values are not the best
+farms once the whole plan's gas is counted. The sub-linear curve is what
+flipped the split from the previous model:
+a small protocol's implied value is a much larger share of its TVL, so its
+$1,000 slice covers the plan's gas far more often. The verdict never
+changes the ranking; it only prices the farm. The definitions, the gas
+accounting and the split are stated in the dashboard's Model & calibration tab.
 
 ## Farm plans
 
@@ -172,13 +198,12 @@ a farm log. Every step states what it costs and how long it takes.
 
 ```
 main.ts                  entrypoint: reads /input/snapshot.json, writes /output
-lib/model.ts             the radar-2 model, farm plans, board validation
+lib/model.ts             the curve-1 model, farm plans, board validation
 vendor/makefun-board.ts  make.fun's dossier library, copied unchanged
 dashboard/index.html     the page shell
 dashboard/app.css        the theme (dark blue, lime accent, no network)
 dashboard/app.js         hero, scatter, stats, verdicts, tabs, filters,
-                         histogram, board, detail modal, benchmarks,
-                         backtest
+                         histogram, board, detail modal, offsets, backtest
 screenshots/              1-board.png, 2-detail.png, 3-filtered.png
 LICENSE                  MIT
 README.md                this file
