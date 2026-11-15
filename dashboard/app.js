@@ -7,7 +7,7 @@
   var DATA = window.RADAR;
   if (!DATA) return;
   var app = document.getElementById('board');
-  var state = { q: '', category: 'all', chain: 'all', verdict: 'all', move: 'all', pill: 'all', ticket: 1000, tab: 'board', sort: 'implied', dir: -1, selected: null };
+  var state = { q: '', category: 'all', chain: 'all', verdict: 'all', move: 'all', pill: 'all', ticket: 1000, tab: 'board', sort: 'implied', dir: -1, selected: null, summaryHidden: false };
 
   function fmtUsd(n) {
     if (n === null || n === undefined || !isFinite(n)) return 'n/a';
@@ -353,8 +353,10 @@
       if (c > 0) parts.push('<text class="hist-n" x="' + (x + (bw - 4) / 2).toFixed(1) + '" y="' + (H - B - h - 3) + '" text-anchor="middle">' + c + '</text>');
       parts.push('<text class="tick" x="' + (x + (bw - 4) / 2).toFixed(1) + '" y="' + (H - 2) + '" text-anchor="middle">' + fmtUsd(edges[idx]) + '</text>');
     });
+    var medX = L + ((Math.log10(MEDIAN_IMPLIED) - 5.5) / (9 - 5.5)) * (W - L - R);
+    parts.push('<line class="hist-median" x1="' + medX.toFixed(1) + '" y1="' + T + '" x2="' + medX.toFixed(1) + '" y2="' + (H - B) + '"><title>Median ' + fmtUsd(MEDIAN_IMPLIED) + '</title></line>');
     parts.push('</svg>');
-    return '<section class="panel hist-strip" title="Log scale, half a decade a bar"><div class="hist-strip-label"><b>Implied values</b> <span>\u00b7 median ' + fmtUsd(MEDIAN_IMPLIED) + '</span></div><div class="hist-strip-svg">' + parts.join('') + '</div></section>';
+    return '<section class="panel hist-strip" title="Log scale, half a decade a bar"><div class="hist-strip-label"><b>Implied values</b> <span>\u00b7 median ' + fmtUsd(MEDIAN_IMPLIED) + '</span></div><div class="hist-strip-svg">' + parts.join('') + '</div><span class="hist-count" title="Click a column to sort, a row for its detail">' + rows().length + ' of ' + DATA.board_size + ' shown</span></section>';
   }
 
   function sortHeader(key, label) {
@@ -417,7 +419,7 @@
       sortHeader('implied', 'Implied value') + sortHeader('slice', 'Airdrop / ' + ticketLabel()) + sortHeader('net', 'Verdict') +
       '<th>Fees \u00b7 Hold</th>' +
       '</tr></thead><tbody>' + body + '</tbody></table></div>' +
-      '<div class="table-meta"><span class="count">' + list.length + ' of ' + DATA.board_size + ' shown \u00b7 click a column to sort, a row for its detail</span></div></div></div>';
+      '</div></div>';
   }
 
   function liveTable() {
@@ -478,6 +480,11 @@
         '<div class="formula">implied = round( 10^( ' + f.intercept + ' + ' + f.slope + ' \u00d7 log10(TVL / $100M) ) \u00d7 sector_offset )</div>' +
         '<p>TVL comes from the snapshot. Age, growth and chain count are not in the price: variant B, which multiplied the curve by the old growth, maturity and chain factors, was tested and rejected \u2014 it loses on both backtests (comparison on the right). R\u00b2 is ' + f.r2 + ': TVL alone explains about ' + Math.round(f.r2 * 100) + '% of the spread in log market cap, the rest is the sector offset and the error the sensitivity range shows.</p>' +
         '<p class="sub">The early radar is every pre-token protocol below the watchlist floor, by TVL; live-token protocols are set aside with their market caps shown. A protocol below the floor is no worse a subject than one on it: the floor is where the reading started, not where it stops.</p>' +
+        '<h3>What this model does not do</h3>' +
+        '<p>The model is fitted on this snapshot\u2019s own live tokens, and the Method and backtest tab tests it against them \u2014 blind, leave-one-out, and on a time split by listing date. But read the Limits there first: the ground truth is today\u2019s market cap, not the price at launch, and the split is by listing date, not a replay of history. The curve earns its error bars against one global number, but the bars are still wide: half the predictions land within ' + V.loo.model.band_50x.toFixed(2) + 'x of the truth leave-one-out, and four in five within ' + V.loo.model.band_80x.toFixed(2) + 'x.</p>' +
+        '<h3>How the verdict is earned</h3>' +
+        '<p>FARM: the slice beats gas and the forgone 4% T-bill yield \u2014 net positive after every cost. THIN: the slice beats the gas but not the forgone yield \u2014 worth it only if fees fall or the slice grows. SKIP: the slice does not even beat the gas.</p>' +
+        '<p class="sub">On this board: ' + VERDICTS.FARM + ' FARM \u00b7 ' + VERDICTS.THIN + ' THIN \u00b7 ' + VERDICTS.SKIP + ' SKIP. The counts follow the gas, not a quota: the top rows by implied value are often SKIP, because $1,000 is a thin slice of a very large TVL.</p>' +
       '</section>' +
       '<section class="panel model-col"><h2>Variant A won, variant B lost \u2014 both shown</h2>' +
         '<div class="table-wrap"><table class="bench"><thead><tr><th>Variant</th><th>LOO median miss</th><th>Time-split median miss</th></tr></thead><tbody>' +
@@ -486,11 +493,6 @@
           '<tr><td>Flat benchmark (global median mcap/TVL)</td><td class="num">x' + V.loo.flat.median_miss.toFixed(2) + '</td><td class="num">x' + V.timesplit.flat.median_miss.toFixed(2) + '</td></tr>' +
         '</tbody></table></div>' +
         '<p>The growth, maturity and chain factors add variance without signal: variant B misses further than variant A leave-one-out (x' + V.variant_b.loo.median_miss.toFixed(2) + ' vs x' + V.variant_a.loo.median_miss.toFixed(2) + ') and on the time split (x' + V.variant_b.timesplit.median_miss.toFixed(2) + ' vs x' + V.variant_a.timesplit.median_miss.toFixed(2) + '), so the board uses A. Selection is by the leave-one-out median miss, computed at run time from this snapshot \u2014 a tie would go to A, the simpler variant.</p>' +
-        '<h3>What this model does not do</h3>' +
-        '<p>The model is fitted on this snapshot\u2019s own live tokens, and the Method and backtest tab tests it against them \u2014 blind, leave-one-out, and on a time split by listing date. But read the Limits there first: the ground truth is today\u2019s market cap, not the price at launch, and the split is by listing date, not a replay of history. The curve earns its error bars against one global number, but the bars are still wide: half the predictions land within ' + V.loo.model.band_50x.toFixed(2) + 'x of the truth leave-one-out, and four in five within ' + V.loo.model.band_80x.toFixed(2) + 'x.</p>' +
-        '<h3>How the verdict is earned</h3>' +
-        '<p>FARM: the slice beats gas and the forgone 4% T-bill yield \u2014 net positive after every cost. THIN: the slice beats the gas but not the forgone yield \u2014 worth it only if fees fall or the slice grows. SKIP: the slice does not even beat the gas.</p>' +
-        '<p class="sub">On this board: ' + VERDICTS.FARM + ' FARM \u00b7 ' + VERDICTS.THIN + ' THIN \u00b7 ' + VERDICTS.SKIP + ' SKIP. The counts follow the gas above, not a quota: the top rows by implied value are often SKIP, because $1,000 is a thin slice of a very large TVL.</p>' +
         '<h3>Farm economics, stated plainly</h3>' +
         '<ul class="assumptions">' +
           '<li>Slice: 10% of the launch goes to depositors, pro rata on TVL \u2014 slice = 0.10 \u00d7 implied \u00d7 $1,000 / TVL, at a $1,000 deposit.</li>' +
@@ -690,17 +692,23 @@
     '</div>';
   }
 
+  function tabBarRow(withSummary) {
+    return '<div class="tabbar-row">' + tabBar() + (withSummary ? '<button type="button" class="button summary-btn" data-act="summary" aria-pressed="' + (!state.summaryHidden) + '">' + (state.summaryHidden ? 'Show summary' : 'Hide summary') + '</button>' : '') + '</div>';
+  }
+  function pageFoot() {
+    return '<footer class="page-foot">Source: ' + esc(DATA.source) + ' \u00b7 Model curve-1, fitted on the snapshot\u2019s ' + DATA.fit.n + ' live tokens \u00b7 No live data: everything on this page comes from the sealed snapshot.</footer>';
+  }
   function render() {
     var row = state.selected ? DATA.rows.filter(function (r) { return r.slug === state.selected; })[0] : null;
     if (state.selected && !row) { state.selected = null; writeHash(); }
     var body;
-    if (row) body = tabBar() + detailPage(row);
-    else if (state.tab === 'board') body = hero() + statsStrip() + tabBar() + controls() + histogram() + boardTable();
-    else if (state.tab === 'live') body = tabBar() + liveTable();
-    else if (state.tab === 'setaside') body = tabBar() + setAsideTab();
-    else if (state.tab === 'backtest') body = tabBar() + backtestTab();
-    else body = tabBar() + modelTab();
-    app.innerHTML = '<div class="shell">' + header() + body + '</div>';
+    if (row) body = tabBarRow(false) + detailPage(row);
+    else if (state.tab === 'board') body = (state.summaryHidden ? '' : hero() + statsStrip()) + tabBarRow(true) + controls() + histogram() + boardTable();
+    else if (state.tab === 'live') body = tabBarRow(false) + liveTable();
+    else if (state.tab === 'setaside') body = tabBarRow(false) + setAsideTab();
+    else if (state.tab === 'backtest') body = tabBarRow(false) + backtestTab();
+    else body = tabBarRow(false) + modelTab();
+    app.innerHTML = '<div class="shell">' + header() + body + pageFoot() + '</div>';
     app.setAttribute('aria-busy', 'false');
   }
 
@@ -720,6 +728,7 @@
     else if (act === 'row') { openDetail(t.getAttribute('data-slug')); }
     else if (act === 'pill') { state.pill = t.getAttribute('data-pill'); writeHash(); render(); }
     else if (act === 'back') { goBackToBoard(); }
+    else if (act === 'summary') { state.summaryHidden = !state.summaryHidden; render(); }
     else if (act === 'clear') { state.q = ''; state.category = 'all'; state.chain = 'all'; state.verdict = 'all'; state.move = 'all'; state.pill = 'all'; writeHash(); render(); }
     else if (act === 'csv') { downloadCsv(); }
   });
