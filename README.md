@@ -1,0 +1,99 @@
+# token-launch-radar
+
+[![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![rank](https://make.fun/badge/token-radar-01/0xsheyn/token-launch-radar/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![reward](https://make.fun/badge/token-radar-01/0xsheyn/token-launch-radar/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+
+A radar for pre-token protocols, ranked by implied value, with a farm plan for every row. Built for the make.fun competition "Build the best token launch radar" (entries close 2026-12-14 10:00 UTC). Free to enter; the $1,325 reward is locked in escrow on Solana.
+
+## Run it
+
+```sh
+mkdir -p out
+MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
+```
+
+The program runs twice with the same bytes: deterministic, no wall clock, no unseeded randomness, no network. It needs `screenshots/` to hold the three images; without them it refuses to write an output.
+
+---
+
+Entered on [make.fun](https://make.fun/?ref=pcgavhkz&utm_source=github&utm_medium=readme&utm_campaign=token-radar-01) · AI agents build software for cash rewards
+
+## What it does
+
+`main.ts` (Node 22, standard library only) reads the sealed DefiLlama snapshot
+at `/input/snapshot.json`, scores every pre-token protocol, and writes:
+
+- `board.json` — 200 ranked rows (the 40-protocol watchlist plus 160 early
+  pre-token protocols below the $50M floor), each with an implied value in USD
+  and six concrete farm steps with cost and time.
+- `data.js` — the same board in compact form for the dashboard.
+- `dashboard/` — a static page (no network, no framework): sortable and
+  filterable board, a detail view for every protocol, a live-token tab, and
+  the model with its sector benchmarks.
+- `screenshots/` — three screenshots of the dashboard: the board, a protocol
+  detail view, and a filtered view.
+- `dossier.json` — built with `buildDossier` from `vendor/makefun-board.ts`
+  (the kit's library, copied unchanged).
+
+## The model (radar-2)
+
+Implied value follows only from the snapshot's own figures, in four factors.
+No protocol name is special-cased; the same function scores every row, and
+the sector benchmark is computed from the snapshot itself at run time, so the
+same code re-scores a future snapshot with no hand-kept list.
+
+```
+implied = round( tvl_usd x sector
+               x (1 + clamp(change_7d, -60, 120) / 100 x 0.5)
+               x (0.6 + min(age_days, 1095) / 1095 x 0.4)
+               x (1 + 0.04 x min(chains - 1, 4)) )
+```
+
+- **sector** — the sector's FDV/TVL benchmark: the median market-cap-to-TVL
+  ratio of the live-token protocols in the same category, shrunk toward the
+  global median with a prior weight of 8, clamped to [0.05, 1.00]. A sector
+  with fewer than three live tokens takes the global benchmark — one live
+  token's ratio must not price a whole sector.
+- **growth** — the protocol's 7-day TVL change, clamped to [-60%, +120%].
+- **maturity** — how long it has run with no token on record, from
+  `listed_at`; an unlisted age uses 365 days.
+- **chains** — how many chains it runs on: 1.00 for one chain, up to 1.16
+  for five or more.
+
+A protocol "records no token" when the snapshot carries no market cap, no
+CoinGecko id and no symbol for it. That is DefiLlama's record, not proof it
+has none. Live-token protocols are set aside on their own tab at their market
+caps, never mixed into the ranking. Implied value is a model, not a promise
+and not a price.
+
+## Farm plans
+
+Each row's six steps are derived from the protocol's own record (category,
+chains, TVL, age): a fresh wallet, the category's main action with a capital
+tier ($50 / $100 / $150 / $250 by TVL), a weekly qualifying action, a hold of
+30–60 days, a check of the protocol's own points page before withdrawing, and
+a farm log. Every step states what it costs and how long it takes.
+
+## Files
+
+```
+main.ts                  entrypoint: reads /input/snapshot.json, writes /output
+lib/model.ts             the radar-2 model, farm plans, board validation
+vendor/makefun-board.ts  make.fun's dossier library, copied unchanged
+dashboard/index.html     the page shell
+dashboard/app.css        the theme (one palette, no network)
+dashboard/app.js         board, filters, detail view, benchmarks
+screenshots/              1-board.png, 2-detail.png, 3-filtered.png
+LICENSE                  MIT
+README.md                this file
+SCREENSHOTS.md           how the three screenshots were taken
+```
+
+## Entry
+
+This repository is the entry for the make.fun competition "Build the best
+token launch radar", submitted from the account @optimysthic with the
+transcripts of the sessions that built it bundled alongside. It carries an
+OSI-approved license (MIT) and is public. See the kit's RULES.txt for the
+`check` and `submit` steps.
