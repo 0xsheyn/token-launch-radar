@@ -268,7 +268,7 @@
         validLine,
         el('p', { class: 'note', text: 'Off-white is the snapshot\u2019s record. Lime is this radar\u2019s estimate. A protocol records no token when DefiLlama carries no CoinGecko id and no symbol for it; a protocol on the list may still have a token its record does not carry, so the radar says \u201crecords no token\u201d, never \u201chas none\u201d.' })
       ),
-      scatter()
+      el('div', { class: 'hero-side' }, scatter(), histogram())
     );
   }
 
@@ -422,9 +422,11 @@
       },
         el('td', { class: 'num' }, rankBadge(r.rank)),
         el('td', null, el('div', { class: 'name' },
-          el('b', { text: r.name }),
-          el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') + ((r.chains || []).length > 2 ? ' +' + ((r.chains || []).length - 2) : '') }),
-          r.watchlist ? el('span', { class: 'tag-watch' }, 'WATCHLIST') : null
+          el('div', { class: 'name-top' },
+            el('b', { text: r.name }),
+            r.watchlist ? el('span', { class: 'tag-watch' }, 'WATCHLIST') : el('span', { class: 'tag-early' }, 'EARLY')
+          ),
+          el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') + ((r.chains || []).length > 2 ? ' +' + ((r.chains || []).length - 2) : '') })
         )),
         el('td', { text: r.category || 'Other' }),
         el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
@@ -939,7 +941,7 @@
       el('p', { class: 'crumb', text: 'RANK ' + row.rank + ' OF ' + DATA.board_size + ' \u00b7 ' + (row.category || 'Other').toUpperCase() + ' \u00b7 ' + chain0.toUpperCase() }),
       el('div', { class: 'detail-title-row' },
         el('h1', { class: 'detail-title', text: row.name }),
-        row.watchlist ? el('span', { class: 'tag-watch', text: 'WATCHLIST' }) : null
+        row.watchlist ? el('span', { class: 'tag-watch', text: 'WATCHLIST' }) : el('span', { class: 'tag-early', text: 'EARLY' })
       ),
       el('p', { class: 'detail-sub', text: 'DefiLlama records no token for ' + row.name + ' (no CoinGecko id, ticker or market cap) as of ' + DATA.as_of + '. A record is not proof: check its own channels before farming.' }),
       stats,
@@ -965,7 +967,6 @@
       shell.appendChild(tabBar());
       shell.appendChild(controls());
       shell.appendChild(boardTable());
-      shell.appendChild(histogram());
     } else if (state.tab === 'live') {
       shell.appendChild(tabBar());
       shell.appendChild(liveTable());

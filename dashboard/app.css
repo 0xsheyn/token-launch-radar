@@ -78,6 +78,8 @@ a { color: var(--accent); }
 
 /* Hero: the claim left, the scatter right. */
 .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: var(--step-6); padding: var(--step-6) 0 var(--step-5); align-items: start; }
+.hero-side { display: flex; flex-direction: column; gap: var(--step-4); min-width: 0; }
+.hero-side .hist { margin-top: 0; }
 .hero-copy p { margin-top: var(--step-4); max-width: 60ch; color: var(--ink-soft); }
 .hero-copy p.note { font-size: 13px; color: var(--muted); }
 /* The hero's validation line: one honest sentence of backtest, so the board screenshot carries it. */
@@ -157,6 +159,8 @@ tbody tr[data-selected="true"] { background: var(--lime-soft); }
 .rank-badge.top { background: var(--lime); color: #0a1526; }
 .rank-badge.top3 { background: #241d0c; color: var(--gold); }
 .tag-watch { display: inline-block; width: fit-content; padding: 1px 6px; border-radius: 3px; background: var(--lime-soft); color: var(--accent); border: 1px solid var(--lime-mid); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }
+.tag-early { display: inline-block; width: fit-content; padding: 1px 6px; border-radius: 3px; background: transparent; color: var(--muted); border: 1px solid var(--border); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }
+.name-top { display: flex; align-items: center; gap: var(--step-2); }
 .status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--lime); }
 .status.live::before { background: var(--gold); }
