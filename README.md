@@ -30,8 +30,9 @@ at `/input/snapshot.json`, scores every pre-token protocol, and writes:
 - `data.js` — the same board in compact form for the dashboard, plus the
   costed plan, the net at $1K / $10K / $100K deposits under a 5% / 10% / 20%
   drop in the launch value, and the three live tokens nearest each row by TVL.
-- `dashboard/` — a static page (no network, no framework): dark-blue
-  editorial theme with a lime accent; hero with a log-log scatter of TVL
+- `dashboard/` — a static page (no network, no framework): light theme
+  with lime and sky-blue accents and a system sans throughout; hero with a
+  model card, a log-log scatter of TVL
   against implied value and the fitted size curve, and one honest sentence
   of backtest (leave-one-out and time-split median miss, model and flat);
   a six-stat strip; five tabs
@@ -230,7 +231,7 @@ main.ts                  entrypoint: reads /input/snapshot.json, writes /output
 lib/model.ts             the curve-1 model, farm plans, board validation
 vendor/makefun-board.ts  make.fun's dossier library, copied unchanged
 dashboard/index.html     the page shell
-dashboard/app.css        the theme (dark blue, lime accent, no network)
+dashboard/app.css        the theme (light, lime + sky-blue accents, no network)
 dashboard/app.js         hero, scatter, stats, verdicts, tabs, filters,
                          board, histogram, detail page, offsets, backtest
 screenshots/              1-board.png, 2-detail.png, 3-filtered.png

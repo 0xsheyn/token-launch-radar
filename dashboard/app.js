@@ -106,6 +106,13 @@
   var SET_ASIDE_TOTAL = (DATA.set_aside || []).reduce(function (a, g) { return a + g.count; }, 0);
   var VERDICTS = { FARM: 0, THIN: 0, SKIP: 0 };
   DATA.rows.forEach(function (r) { if (r.economics) VERDICTS[r.economics.verdict]++; });
+  var BEST_HOUR = (function () {
+    var best = null;
+    DATA.rows.forEach(function (r) {
+      if (r.economics && (!best || r.economics.net_per_hour_usd > best.economics.net_per_hour_usd)) best = r;
+    });
+    return best;
+  })();
   var GAS_MIN = Math.min.apply(null, DATA.rows.map(function (r) { return r.economics ? r.economics.gas_usd : Infinity; }));
   var GAS_MAX = Math.max.apply(null, DATA.rows.map(function (r) { return r.economics ? r.economics.gas_usd : 0; }));
   var MEDIAN_IMPLIED = (function () {
@@ -186,13 +193,16 @@
       ),
       el('div', { class: 'top-meta' },
         el('span', { text: 'Snapshot ' + DATA.as_of + ' \u00b7 DefiLlama protocols \u00b7 ' + DATA.board_size + ' protocols ranked' }),
-        el('span', { class: 'badge', text: 'page = board.json: ' + matched + '/' + DATA.board_size + ' ranks and values match' })
+        el('div', { class: 'top-pills' },
+          el('span', { class: 'badge', text: '\u2713 Watchlist ' + DATA.watchlist_size + '/' + DATA.watchlist_size + ' on the board' }),
+          el('span', { class: 'badge', text: '\u2713 Recomputed here: ' + matched + '/' + DATA.board_size + ' rows equal board.json' })
+        )
       )
     );
   }
 
   // The hero scatter: TVL against implied value on log-log axes, drawn by hand as one inline SVG.
-  // Lime dots are this radar's estimates for the 200 board rows; grey dots are the live comps'
+  // Sky-blue dots are this radar's estimates for the 200 board rows; grey dots are the live comps'
   // market caps; the curve is the fitted size curve, sub-linear in TVL. No library, no network.
   function scatter() {
     var pts = DATA.rows.filter(function (r) { return r.tvl_usd > 0 && r.implied_value_usd > 0; }).map(function (r) { return { x: r.tvl_usd, y: r.implied_value_usd, live: false }; });
@@ -233,7 +243,43 @@
     return el('figure', { class: 'panel scatter-card' },
       el('figcaption', { text: 'HOW A LAUNCH IS PRICED' }),
       el('div', { html: parts.join('') }),
-      el('p', { class: 'fig-note', text: 'Lime dots are this radar\u2019s estimates for the ' + DATA.board_size + '. Grey dots are the ' + DATA.live_size + ' live comps\u2019 market caps. Curve: the fitted size curve, log10(mcap) = ' + DATA.fit.intercept + ' + ' + DATA.fit.slope + ' \u00d7 log10(TVL/$100M) — a tenfold TVL buys about ' + Math.pow(10, DATA.fit.slope).toFixed(1) + 'x the market cap.' })
+      el('p', { class: 'fig-note', text: 'Sky-blue dots are this radar\u2019s estimates for the ' + DATA.board_size + '. Grey dots are the ' + DATA.live_size + ' live comps\u2019 market caps. Curve: the fitted size curve, log10(mcap) = ' + DATA.fit.intercept + ' + ' + DATA.fit.slope + ' \u00d7 log10(TVL/$100M) — a tenfold TVL buys about ' + Math.pow(10, DATA.fit.slope).toFixed(1) + 'x the market cap.' })
+    );
+  }
+
+  // The model card: the fitted formula in monospace and the blind-test table, all numbers
+  // read from data.js — never typed in here. Variant B is marked rejected: it loses to the
+  // selected curve on both tests, so the board prices from variant A only.
+  function modelCard() {
+    var V = DATA.validation;
+    function missRow(label, miss, within, extra) {
+      return el('tr', { class: extra && extra.rowClass ? extra.rowClass : null },
+        el('td', null, label, extra && extra.tag ? el('span', { class: 'rejected', text: extra.tag }) : null),
+        el('td', { class: 'num', text: '\u00d7' + miss.toFixed(2) }),
+        el('td', { class: 'num', text: Math.round(within) + '%' })
+      );
+    }
+    return el('section', { class: 'panel model-card', 'aria-label': 'How a launch is priced' },
+      el('div', { class: 'model-card-head' },
+        el('h2', { text: 'How a launch is priced' }),
+        el('span', { class: 'model-fn', text: 'impliedValue()' })
+      ),
+      el('p', { class: 'formula', text: '10^' + DATA.fit.intercept.toFixed(3) + ' \u00d7 (TVL/$100M)^' + DATA.fit.slope.toFixed(3) + ' \u00d7 sector' }),
+      el('table', { class: 'model-bench' },
+        el('thead', null, el('tr', null,
+          el('th', { scope: 'col', text: 'Blind test' }),
+          el('th', { scope: 'col', text: 'Miss' }),
+          el('th', { scope: 'col', text: 'Within 2\u00d7' })
+        )),
+        el('tbody', null,
+          missRow('One flat cap/TVL multiple', V.loo.flat.median_miss, V.loo.flat.within_2x_pct),
+          missRow('Size curve + sector', V.loo.model.median_miss, V.loo.model.within_2x_pct, { rowClass: 'model-row' }),
+          missRow('Time-split, same model', V.timesplit.model.median_miss, V.timesplit.model.within_2x_pct),
+          missRow('Variant B, with growth \u00d7 maturity \u00d7 chain', V.variant_b.loo.median_miss, V.variant_b.loo.within_2x_pct, { tag: 'rejected' })
+        )
+      ),
+      el('p', { class: 'model-foot', text: 'The ' + V.timesplit.test_n + ' newest tokens, fit on the ' + V.timesplit.fit_n + ' older.' }),
+      el('p', { class: 'model-foot', text: V.timesplit.excluded_n + ' tokens without a listing date, excluded from the time split.' })
     );
   }
 
@@ -257,19 +303,32 @@
       ' vs flat x' + V.timesplit.flat.median_miss.toFixed(2),
       ' — the curve ' + beatText + '.'
     );
+    var ticketLine = el('p', { class: 'ticket-line' },
+      'On a $1,000 ticket: ',
+      el('b', { class: 't-farm', text: 'FARM ' + VERDICTS.FARM }),
+      ' \u00b7 ',
+      el('b', { class: 't-thin', text: 'THIN ' + VERDICTS.THIN }),
+      ' \u00b7 ',
+      el('b', { class: 't-skip', text: 'SKIP ' + VERDICTS.SKIP }),
+      ' \u00b7 best per hour ',
+      el('b', { text: BEST_HOUR ? BEST_HOUR.name : 'n/a' }),
+      ' ',
+      el('b', { class: 'pos', text: BEST_HOUR ? fmtSigned(BEST_HOUR.economics.net_per_hour_usd) + '/h' : 'n/a' })
+    );
     return el('section', { class: 'hero' },
       el('div', { class: 'hero-copy' },
         el('h1', null,
           el('span', { text: DATA.board_size + ' protocols record no token.' }),
           el('br'),
-          el('em', { text: 'The fitted size curve prices them at ' + fmtUsd(TOTAL_IMPLIED) + '.' })
+          el('span', { text: 'Priced like the ' + DATA.fit.n + ' tokens that already trade, their launches imply ' + fmtUsd(TOTAL_IMPLIED) + '.' })
         ),
         el('p', { text: 'Every protocol the feed tracks that records no token and is nobody else\u2019s product, priced from the ones that do: market cap grows slower than TVL — the curve fitted to the snapshot\u2019s ' + DATA.fit.n + ' trading protocols says a tenfold TVL buys about ' + Math.pow(10, DATA.fit.slope).toFixed(1) + 'x the market cap — so each sector\u2019s offset around that curve prices what is still to come.' }),
         validLine,
-        el('p', { class: 'note', text: 'Off-white is the snapshot\u2019s record. Lime is this radar\u2019s estimate. A protocol records no token when DefiLlama carries no CoinGecko id and no symbol for it; a protocol on the list may still have a token its record does not carry, so the radar says \u201crecords no token\u201d, never \u201chas none\u201d.' })
+        ticketLine,
+        el('p', { class: 'note', text: 'Sky blue is this radar\u2019s estimate; grey is the live comps\u2019 market caps. A protocol records no token when DefiLlama carries no CoinGecko id and no symbol for it; a protocol on the list may still have a token its record does not carry, so the radar says \u201crecords no token\u201d, never \u201chas none\u201d.' })
       ),
-      scatter(),
-      histogram()
+      modelCard(),
+      scatter()
     );
   }
 
@@ -744,7 +803,7 @@
   }
 
   // The peers scatter: the live comps' market caps against TVL on log-log axes, the fitted
-  // size curve dashed through them, and this row as one lime dot at (TVL, implied value).
+  // size curve dashed through them, and this row as one sky-blue dot at (TVL, implied value).
   function peerScatter(row) {
     var pts = DATA.live.filter(function (r) { return r.tvl_usd > 0 && r.mcap_usd !== null && r.mcap_usd > 0; }).map(function (r) { return { x: r.tvl_usd, y: r.mcap_usd }; });
     var xs = pts.map(function (p) { return p.x; });
@@ -968,6 +1027,7 @@
       shell.appendChild(tabBar());
       shell.appendChild(controls());
       shell.appendChild(boardTable());
+      shell.appendChild(histogram());
     } else if (state.tab === 'live') {
       shell.appendChild(tabBar());
       shell.appendChild(liveTable());
