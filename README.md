@@ -67,6 +67,47 @@ has none. Live-token protocols are set aside on their own tab at their market
 caps, never mixed into the ranking. Implied value is a model, not a promise
 and not a price.
 
+## Sensitivity
+
+Every row of `board.json` carries a `sensitivity` object next to its
+implied value. It answers one question the point estimate cannot: how far
+does this row's launch value move when the inputs it leans on turn against
+it?
+
+```
+sensitivity: {
+  tvlShockUp, tvlShockDown,       // TVL 20% higher / lower at launch
+  growthShockUp, growthShockDown, // growth multiplier 0.25 hotter / colder
+  sensitivitySpreadPct            // the four shocks' spread, in %
+}
+```
+
+Two of the model's four factors move fast around a launch, so those are the
+two that get shaken. A protocol's TVL can jump on one large deposit or fall
+on one large withdrawal, and a single week's change is the noisiest number
+the snapshot carries. The sector benchmark, the protocol's age and its chain
+count move slowly by comparison, so the shocks hold those three still and
+move only TVL and the growth multiplier.
+
+The growth shocks are clamped to [0.5, 1.8]. Below 0.5 the multiplier would
+mean a shrinkage worse than the growth floor already allows, and above 1.8
+it would mean a weekly run hotter than the growth cap already allows, so
+neither end of the clamp invents a world the model itself refuses to price.
+
+Read `sensitivitySpreadPct` as the row's fragility: the distance between
+the highest and the lowest shocked value, as a percentage of the row's own
+implied value. A row whose shocks span 40% nearly halves on a bad week or
+a big withdrawal; a row at 15% barely moves. Two rows can sit next to each
+other with the same implied value and very different spreads — the spread
+is what tells them apart when the launch does not go as planned.
+
+Sensitivity changes nothing about the ranking. The board sorts on implied
+value exactly as before, every implied value is the same number it was, and
+the shocks are reported alongside so a reader can carry the range in their
+head instead of a single number. The dashboard does not display the shocks;
+they live in `board.json` only, for anyone who reads the data rather than
+the page.
+
 ## Farm plans
 
 Each row's six steps are derived from the protocol's own record (category,

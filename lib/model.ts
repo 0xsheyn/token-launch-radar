@@ -122,6 +122,7 @@ export interface BoardRow {
   token_status: 'pre-token';
   age_days: number | null;
   implied_value_usd: number;
+  sensitivity: LaunchSensitivity;
   model: {
     sector_multiple: number;
     growth_pct: number;
@@ -274,6 +275,119 @@ export function impliedValue(
   return { implied, sector, growthPct, growthMult, maturityMult, chainMult, age };
 }
 
+// ---------------------------------------------------------------------------
+// Launch-value sensitivity
+// An implied value is a point estimate, and a point estimate hides how much
+// it leans on its inputs. Two of the four factors move fast around a launch:
+// the TVL, which one large deposit or withdrawal can move overnight, and the
+// 7-day growth, the noisiest number the snapshot carries. The sector
+// benchmark, the protocol's age and its chain count move slowly, so this
+// section holds those three still and shakes only the two fast inputs:
+//   TVL 20% higher at launch          -> tvlShockUp
+//   TVL 20% lower at launch           -> tvlShockDown
+//   growth multiplier 0.25 hotter     -> growthShockUp
+//   growth multiplier 0.25 colder     -> growthShockDown
+//
+// The growth shocks are clamped to [0.5, 1.8]: below 0.5 would mean a
+// shrinkage worse than the growth floor allows, above 1.8 a weekly run
+// hotter than the growth cap allows. The spread between the highest and the
+// lowest shocked value, as a percentage of the row's own implied value, is
+// the row's sensitivitySpreadPct: a wide spread means the launch value is
+// fragile, a narrow one means it barely moves when the fast inputs turn
+// against it. Nothing here changes the ranking or the implied value; the
+// board sorts exactly as before, and the shocks are reported alongside it
+// so a reader can carry the range instead of a single number.
+// ---------------------------------------------------------------------------
+
+/** How far a protocol's TVL may swing in the shock, up or down. */
+export const TVL_SHOCK = 0.2;
+
+/** How far the growth multiplier may swing in the shock, up or down. */
+export const GROWTH_SHOCK = 0.25;
+
+/** The coldest growth multiplier a shock may reach. */
+export const GROWTH_MULT_FLOOR = 0.5;
+
+/** The hottest growth multiplier a shock may reach. */
+export const GROWTH_MULT_CEILING = 1.8;
+
+/** One row's launch-value sensitivity: four shocked implied values and their spread. */
+export interface LaunchSensitivity {
+  /** Implied value with TVL 20% higher at launch, everything else held. */
+  tvlShockUp: number;
+  /** Implied value with TVL 20% lower at launch, everything else held. */
+  tvlShockDown: number;
+  /** Implied value with the growth multiplier 0.25 hotter, everything else held. */
+  growthShockUp: number;
+  /** Implied value with the growth multiplier 0.25 colder, everything else held. */
+  growthShockDown: number;
+  /** The four shocks' spread as a percentage of the row's own implied value. */
+  sensitivitySpreadPct: number;
+}
+
+/** A growth multiplier held inside the shock's sane range. */
+function clampGrowthMult(mult: number): number {
+  return Math.min(GROWTH_MULT_CEILING, Math.max(GROWTH_MULT_FLOOR, mult));
+}
+
+/**
+ * One implied value from its parts, on the same rule as the model itself:
+ * the base times the three multipliers, rounded, never below one dollar.
+ */
+function rescoreImplied(base: number, growthMult: number, maturityMult: number, chainMult: number): number {
+  return Math.max(1, Math.round(base * growthMult * maturityMult * chainMult));
+}
+
+/**
+ * A protocol's launch-value sensitivity: the implied value under a TVL shock
+ * of twenty per cent either way and a growth-multiplier shock of a quarter
+ * either way, with the sector, the maturity and the chain multipliers held
+ * exactly as the model scored them. The spread is the distance between the
+ * highest and the lowest shocked value, in per cent of the row's own
+ * implied value, rounded to two decimals.
+ */
+export function launchSensitivity(
+  protocol: SnapshotProtocol,
+  asOf: string,
+  model: ModelConstants,
+  benchmarks: { global: number; byCategory: SectorBenchmark[] },
+): LaunchSensitivity {
+  const v = impliedValue(protocol, asOf, model, benchmarks);
+  const base = protocol.tvl_usd * v.sector;
+  const tvlShockUp = rescoreImplied(base * (1 + TVL_SHOCK), v.growthMult, v.maturityMult, v.chainMult);
+  const tvlShockDown = rescoreImplied(base * (1 - TVL_SHOCK), v.growthMult, v.maturityMult, v.chainMult);
+  const growthShockUp = rescoreImplied(base, clampGrowthMult(v.growthMult + GROWTH_SHOCK), v.maturityMult, v.chainMult);
+  const growthShockDown = rescoreImplied(base, clampGrowthMult(v.growthMult - GROWTH_SHOCK), v.maturityMult, v.chainMult);
+  const highest = Math.max(tvlShockUp, tvlShockDown, growthShockUp, growthShockDown);
+  const lowest = Math.min(tvlShockUp, tvlShockDown, growthShockUp, growthShockDown);
+  const sensitivitySpreadPct = Math.round(((highest - lowest) / v.implied) * 10000) / 100;
+  return { tvlShockUp, tvlShockDown, growthShockUp, growthShockDown, sensitivitySpreadPct };
+}
+
+/**
+ * Why one row's sensitivity is not one the gate will take, or null: the
+ * four shocked values must be positive whole dollars, the TVL shock up must
+ * sit above the TVL shock down, the growth shock up must sit above the
+ * growth shock down, and the spread must be a finite, non-negative
+ * percentage of a positive implied value.
+ */
+export function sensitivityIssue(s: LaunchSensitivity, implied: number): string | null {
+  const shocks: [string, number][] = [
+    ['tvlShockUp', s.tvlShockUp],
+    ['tvlShockDown', s.tvlShockDown],
+    ['growthShockUp', s.growthShockUp],
+    ['growthShockDown', s.growthShockDown],
+  ];
+  for (const [name, value] of shocks) {
+    if (!Number.isSafeInteger(value) || value <= 0) return `sensitivity ${name} is ${value}`;
+  }
+  if (s.tvlShockUp < s.tvlShockDown) return 'sensitivity TVL shocks are inverted';
+  if (s.growthShockUp < s.growthShockDown) return 'sensitivity growth shocks are inverted';
+  if (!Number.isFinite(s.sensitivitySpreadPct) || s.sensitivitySpreadPct < 0) return `sensitivity spread is ${s.sensitivitySpreadPct}`;
+  if (implied <= 0) return 'sensitivity needs a positive implied value';
+  return null;
+}
+
 /** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
 const VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
 
@@ -321,7 +435,8 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
 
   const scored = [...chosen.values()].map((p) => {
     const v = impliedValue(p, snapshot.as_of, model, benchmarks);
-    return { p, ...v };
+    const sensitivity = launchSensitivity(p, snapshot.as_of, model, benchmarks);
+    return { p, ...v, sensitivity };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
   return scored.map((s, i) => ({
@@ -339,6 +454,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     token_status: 'pre-token',
     age_days: s.age,
     implied_value_usd: s.implied,
+    sensitivity: s.sensitivity,
     model: {
       sector_multiple: round4(s.sector),
       growth_pct: s.growthPct,
@@ -591,6 +707,8 @@ export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null
     if (steps.length < 3 || steps.length > 12) return `${r.slug} has ${steps.length} farm steps`;
     for (const s of steps) if (s.length < 20 || s.length > 600) return `${r.slug} has a farm step of ${s.length} characters`;
     if (!Number.isSafeInteger(r.implied_value_usd) || r.implied_value_usd <= 0) return `${r.slug} has implied value ${r.implied_value_usd}`;
+    const sIssue = sensitivityIssue(r.sensitivity, r.implied_value_usd);
+    if (sIssue !== null) return `${r.slug}: ${sIssue}`;
   }
   return null;
 }
