@@ -31,7 +31,8 @@ at `/input/snapshot.json`, scores every pre-token protocol, and writes:
   costed plan, the net at $1K / $10K / $100K deposits under a 5% / 10% / 20%
   drop in the launch value, and the three live tokens nearest each row by TVL.
 - `dashboard/` — a static page (no network, no framework): light theme
-  with lime and sky-blue accents and a system sans throughout; hero with a
+  with lime and sky-blue accents and Inter throughout, the variable font
+  bundled locally in `dashboard/fonts/`; hero with a
   model card, a log-log scatter of TVL
   against implied value and the fitted size curve, and one honest sentence
   of backtest (leave-one-out and time-split median miss, model and flat);

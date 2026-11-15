@@ -1,7 +1,21 @@
 /* Token Radar's theme, curve-1. Light like the reference: white page, slate ink, one lime
-   accent and one sky-blue accent. Sans throughout — system stack only, no web font — with
-   monospace reserved for the formula line. Hairline rules, thin-bordered cards. No network:
-   no font, image or address is loaded. */
+   accent and one sky-blue accent. Inter throughout — the variable font is bundled locally
+   in fonts/, no web font, no network: no font, image or address is loaded. Monospace is
+   reserved for the formula line. Hairline rules, thin-bordered cards. */
+@font-face {
+  font-family: 'Inter';
+  src: url('fonts/inter-var.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('fonts/inter-var-italic.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
 :root {
   --paper: #f8fafc;
   --paper-deep: #f1f5f9;
@@ -25,7 +39,7 @@
   --gold: #eab308;
   --radius-control: 6px;
   --radius-panel: 10px;
-  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --step-1: 4px;
   --step-2: 8px;
@@ -78,10 +92,13 @@ a { color: var(--accent); }
   font-size: 12px; font-weight: 600; white-space: nowrap;
 }
 
-/* Hero: the claim left, the model card middle, the scatter right. */
+/* Hero: the claim left, the model card middle, the scatter right. The copy spans both
+   rows; the ticket line and the note sit below the model card and the scatter. */
 .hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: var(--step-6); padding: var(--step-6) 0 var(--step-5); align-items: start; }
+.hero-copy { grid-row: 1 / span 2; }
+.hero-foot { grid-column: 2 / span 2; display: flex; flex-direction: column; gap: var(--step-3); }
 .hero-copy p { margin-top: var(--step-4); max-width: 60ch; color: var(--ink-soft); }
-.hero-copy p.note { font-size: 13px; color: var(--muted); }
+.hero-foot p.note { font-size: 13px; color: var(--muted); }
 /* The hero's validation line: one honest sentence of backtest, so the board screenshot carries it. */
 .valid-line { padding: var(--step-2) var(--step-3); border-left: 3px solid var(--lime); background: var(--lime-soft); border-radius: var(--radius-control); font-size: 13px; }
 .ticket-line { font-size: 14px; }
@@ -293,6 +310,8 @@ tbody tr[data-selected="true"] { background: var(--lime-soft); }
 
 @media (max-width: 1100px) {
   .hero { grid-template-columns: 1fr; }
+  .hero-copy { grid-row: auto; }
+  .hero-foot { grid-column: auto; }
   .stats { grid-template-columns: repeat(3, 1fr); }
   .stat:nth-child(4) { border-left: 0; padding-left: 0; }
   .stat { border-top: 1px solid var(--border); }

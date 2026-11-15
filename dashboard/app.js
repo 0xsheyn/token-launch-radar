@@ -315,6 +315,7 @@
       ' ',
       el('b', { class: 'pos', text: BEST_HOUR ? fmtSigned(BEST_HOUR.economics.net_per_hour_usd) + '/h' : 'n/a' })
     );
+    var noteP = el('p', { class: 'note', text: 'Sky blue is this radar\u2019s estimate; grey is the live comps\u2019 market caps. A protocol records no token when DefiLlama carries no CoinGecko id and no symbol for it; a protocol on the list may still have a token its record does not carry, so the radar says \u201crecords no token\u201d, never \u201chas none\u201d.' });
     return el('section', { class: 'hero' },
       el('div', { class: 'hero-copy' },
         el('h1', null,
@@ -323,12 +324,11 @@
           el('span', { text: 'Priced like the ' + DATA.fit.n + ' tokens that already trade, their launches imply ' + fmtUsd(TOTAL_IMPLIED) + '.' })
         ),
         el('p', { text: 'Every protocol the feed tracks that records no token and is nobody else\u2019s product, priced from the ones that do: market cap grows slower than TVL — the curve fitted to the snapshot\u2019s ' + DATA.fit.n + ' trading protocols says a tenfold TVL buys about ' + Math.pow(10, DATA.fit.slope).toFixed(1) + 'x the market cap — so each sector\u2019s offset around that curve prices what is still to come.' }),
-        validLine,
-        ticketLine,
-        el('p', { class: 'note', text: 'Sky blue is this radar\u2019s estimate; grey is the live comps\u2019 market caps. A protocol records no token when DefiLlama carries no CoinGecko id and no symbol for it; a protocol on the list may still have a token its record does not carry, so the radar says \u201crecords no token\u201d, never \u201chas none\u201d.' })
+        validLine
       ),
       modelCard(),
-      scatter()
+      scatter(),
+      el('div', { class: 'hero-foot' }, ticketLine, noteP)
     );
   }
 
