@@ -1,17 +1,17 @@
 /* Token Radar's theme, curve-1. Light like the reference: white page, slate ink, one lime
-   accent and one sky-blue accent. Inter throughout — the variable font is bundled locally
+   accent and one sky-blue accent. Geist throughout — the variable font is bundled locally
    in fonts/, no web font, no network: no font, image or address is loaded. Monospace is
    reserved for the formula line. Hairline rules, thin-bordered cards. */
 @font-face {
-  font-family: 'Inter';
-  src: url('fonts/inter-var.woff2') format('woff2-variations');
+  font-family: 'Geist';
+  src: url('fonts/geist-var.woff2') format('woff2-variations');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: 'Inter';
-  src: url('fonts/inter-var-italic.woff2') format('woff2-variations');
+  font-family: 'Geist';
+  src: url('fonts/geist-var-italic.woff2') format('woff2-variations');
   font-weight: 100 900;
   font-style: italic;
   font-display: swap;
@@ -39,7 +39,7 @@
   --gold: #eab308;
   --radius-control: 6px;
   --radius-panel: 10px;
-  --font-body: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: 'Geist', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --step-1: 4px;
   --step-2: 8px;
@@ -64,6 +64,7 @@ h1 { font-size: 40px; line-height: 1.12; font-weight: 700; }
 h2 { font-size: 21px; line-height: 1.2; font-weight: 700; }
 h3 { font-size: 13px; line-height: 1.3; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 p { margin: 0; }
+figure { margin: 0; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 a { color: var(--accent); }
@@ -94,7 +95,7 @@ a { color: var(--accent); }
 
 /* Hero: the claim left, the model card middle, the scatter right. The copy spans both
    rows; the ticket line and the note sit below the model card and the scatter. */
-.hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: var(--step-6); padding: var(--step-6) 0 var(--step-5); align-items: start; }
+.hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: var(--step-6) var(--step-4); padding: var(--step-6) 0 var(--step-5); align-items: stretch; }
 .hero-copy { grid-row: 1 / span 2; }
 .hero-foot { grid-column: 2 / span 2; display: flex; flex-direction: column; gap: var(--step-3); }
 .hero-copy p { margin-top: var(--step-4); max-width: 60ch; color: var(--ink-soft); }
