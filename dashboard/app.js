@@ -437,12 +437,10 @@
       );
       tbody.appendChild(tr);
     });
-    return el('div', { class: 'panel' },
-      el('div', { class: 'table-meta' },
-        el('span', { class: 'count', text: list.length + ' of ' + DATA.board_size + ' shown \u00b7 click a column to sort, a row for its detail' })
-      ),
-      el('div', { class: 'table-wrap' },
-        el('table', { class: 'board-table' },
+    return el('div', null,
+      el('div', { class: 'panel' },
+        el('div', { class: 'table-wrap' },
+          el('table', { class: 'board-table' },
           el('thead', null, el('tr', null,
             sortHeader('implied', '#'),
             sortHeader('name', 'Protocol'),
@@ -457,8 +455,11 @@
           )),
           tbody
         )
+      ),
+      el('div', { class: 'table-meta' },
+        el('span', { class: 'count', text: list.length + ' of ' + DATA.board_size + ' shown \u00b7 click a column to sort, a row for its detail' })
       )
-    );
+    ));
   }
 
   function liveTable() {

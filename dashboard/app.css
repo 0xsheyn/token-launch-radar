@@ -128,7 +128,7 @@ a { color: var(--accent); }
 .pill { min-height: 36px; padding: 0 var(--step-3); border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); font-size: 13px; font-weight: 600; }
 .pill.active { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .count { margin-left: auto; color: var(--muted); font-size: 13px; }
-.table-meta { display: flex; justify-content: flex-end; padding: var(--step-3) var(--step-4) 0; }
+.table-meta { display: flex; justify-content: flex-end; padding: var(--step-2) 0 0; }
 
 /* Panels, tables, the live note. */
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel); overflow: hidden; }
