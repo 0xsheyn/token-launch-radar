@@ -70,8 +70,8 @@ function copyFiles(from: string, to: string): string[] {
   return copied;
 }
 
-copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
-copyFiles(join(here, 'dashboard', 'fonts'), join(out, 'dashboard', 'fonts'));
+const dashFiles = copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
+const fontFiles = copyFiles(join(here, 'dashboard', 'fonts'), join(out, 'dashboard', 'fonts'));
 const shots = copyFiles(join(here, 'screenshots'), join(out, 'screenshots'));
 if (shots.length < 3) {
   process.stderr.write(`token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 3, the board, a detail view and a filtered view\n`);
@@ -91,5 +91,5 @@ process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
     `token radar: curve-1 fit: log10(mcap) = ${radar.fit.intercept} + ${radar.fit.slope} x log10(TVL/$100M), R2 ${radar.fit.r2} on ${radar.fit.n} live tokens; variant ${radar.validation.variant_selected} selected (A: curve + sector offset)\n` +
     `token radar: backtest: leave-one-out median miss x${radar.validation.loo.model.median_miss} vs flat x${radar.validation.loo.flat.median_miss}; time-split x${radar.validation.timesplit.model.median_miss} vs flat x${radar.validation.timesplit.flat.median_miss}\n` +
-    `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
+    `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dashFiles.length + fontFiles.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

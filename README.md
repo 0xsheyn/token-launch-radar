@@ -43,7 +43,10 @@ at `/input/snapshot.json`, scores every pre-token protocol, and writes:
   $1,000 and a FARM / THIN / SKIP verdict per row; a full-page detail view
   for every protocol — the value breakdown, the nearest traded peers, the
   costed seven-step farm plan and the net by deposit and drop; and the model
-  with its sector offsets and the variant comparison.
+  with its sector offsets and the variant comparison, plus a per-sector
+  panel, a bootstrap stability check and a fit-set sensitivity table
+  (all computed at run time from the snapshot, in `data.js` under
+  `validation`).
 - `screenshots/` — three screenshots of the dashboard: the board, a protocol
   detail view, and a filtered view.
 - `dossier.json` — built with `buildDossier` from `vendor/makefun-board.ts`
@@ -90,6 +93,27 @@ median miss is the one the board uses:
   use them. Both variants' numbers are in the dashboard's Model &
   calibration tab and in `data.js` (`validation.variant_a` /
   `variant_b`); the rejected variant is shown, not hidden.
+
+The Model & calibration tab also carries three checks that the fit is
+not a lucky subset, all computed at run time from the snapshot (seeded
+where resampling is involved, so the numbers are the same on every run):
+
+- **Per sector:** one row per category with at least three live tokens
+  (14 on this snapshot): the sector offset, live-token count, median
+  mcap/TVL, board rows, and the median leave-one-out miss of that
+  sector's live tokens (each predicted with the curve and the offsets
+  refitted without it). Lending is the largest (15 live, offset 0.700,
+  miss x5.61); RWA the best-predicted (miss x1.40).
+- **Bootstrap:** the curve and the offsets refitted on 200 resamples of
+  the 128 live tokens (mulberry32, seed 20261114). Slope P5–P95 0.397–
+  0.652; intercept 7.074–7.318; the top row, Steakhouse Financial,
+  implies $90.1M with a P5–P95 of $50.9M–$171.0M — wide, and the point
+  estimate sits inside it.
+- **Fit-set sensitivity:** the same leave-one-out test fitted and tested
+  within three sets — all 128 live tokens (x3.62), TVL ≥ $10M (n = 101,
+  x4.14), and mcap/TVL ≤ 20x (n = 125, x3.20). The miss moves only
+  modestly when the smallest tokens or the wildest ratios are left out,
+  so the curve is not tuned to one lucky subset.
 
 A protocol "records no token" when the snapshot carries no market cap, no
 CoinGecko id and no symbol for it. That is DefiLlama's record, not proof it

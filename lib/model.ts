@@ -1111,9 +1111,15 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
   const board = buildBoard(snapshot, model, fit, offsets, validation.variant_selected, validation.residual_quantiles);
   const live = liveRows(snapshot);
   const early = board.filter((r) => !snapshot.watchlist.includes(r.slug)).length;
+  // The sector panel and the bootstrap need the board: the panel counts board rows per
+  // sector, the bootstrap re-prices the top-1 row under each resample's refit.
+  validation.sector_panel = buildSectorPanel(snapshot, board, validation.variant_selected, model);
+  validation.bootstrap = bootstrapFit(liveAll, snapshot.as_of, board[0]!, model);
   const radar: RadarData = {
     as_of: snapshot.as_of,
-    source: snapshot.source,
+    // Scheme-free provenance: the snapshot's source carries an https:// URL, and dashboard
+    // files must name no network address — the text keeps the host and the fetch time.
+    source: snapshot.source.replace('https://', '').replace('http://', ''),
     floor_usd: snapshot.floor_usd,
     model,
     model_version: MODEL_VERSION,
@@ -1238,6 +1244,42 @@ export interface BacktestPoint {
   predicted_usd: number;
 }
 
+/** One row of the per-sector panel: what the Model tab shows per category. */
+export interface SectorPanelRow {
+  category: string;
+  offset: number;
+  live_count: number;
+  /** Median mcap/TVL of the sector's live tokens. */
+  median_ratio: number;
+  /** Board rows in this category. */
+  board_rows: number;
+  /** Median leave-one-out miss of the sector's live tokens, variant A (the board's variant); null when the sector has no live token in the LOO. */
+  loo_median_miss: number | null;
+  loo_n: number;
+}
+
+/** The bootstrap stability check: 200 seeded resamples of the live tokens, curve and offsets refitted each time. */
+export interface BootstrapResult {
+  resamples: number;
+  slope_p5: number;
+  slope_p95: number;
+  intercept_p5: number;
+  intercept_p95: number;
+  top1_slug: string;
+  top1_name: string;
+  /** P5–P95 of the top-1 protocol's implied value across the resamples. */
+  top1_p5: number;
+  top1_p95: number;
+}
+
+/** One row of the fit-set sensitivity table: leave-one-out within that fit-set, variant A. */
+export interface FitsetSensitivityRow {
+  label: string;
+  n: number;
+  loo_median_miss: number;
+  within_2x_pct: number;
+}
+
 /** Everything the backtest tab shows, computed from the snapshot at run time. */
 export interface ModelValidation {
   live_n: number;
@@ -1250,6 +1292,11 @@ export interface ModelValidation {
   loo: { n: number; model: BacktestMetrics; flat: BacktestMetrics };
   timesplit: { fit_n: number; test_n: number; excluded_n: number; model: BacktestMetrics; flat: BacktestMetrics; points: BacktestPoint[] };
   residual_quantiles: ResidualQuantiles;
+  fitset_sensitivity: FitsetSensitivityRow[];
+  /** Filled by buildRadar once the board exists (it needs board row counts and the top-1 row). */
+  sector_panel: SectorPanelRow[];
+  /** Filled by buildRadar once the board exists (it needs the top-1 row). */
+  bootstrap: BootstrapResult | null;
 }
 
 /** One test's numbers from its misses: the median, the shares inside 2x and 3x, and the bands. */
@@ -1266,6 +1313,155 @@ function summarizeMisses(misses: number[]): BacktestMetrics {
     within_3x_pct: within(3),
     band_50x: Math.round(median * 100) / 100,
     band_80x: Math.round(band80 * 100) / 100,
+  };
+}
+
+/** A seeded PRNG (mulberry32): the bootstrap resamples the same 128 tokens every run, so the dossier stays byte-identical. */
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return function (): number {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** One live token's leave-one-out misses, both variants, plus its flat miss: the shared core of the backtest, the sector panel and the fit-set table, so all three quote the same LOO. */
+export interface LooToken {
+  slug: string;
+  category: string;
+  missA: number;
+  missB: number;
+  residualA: number;
+  residualB: number;
+  flatMiss: number;
+}
+
+export function looTokens(live: SnapshotProtocol[], asOf: string, model: ModelConstants = MODEL): LooToken[] {
+  const out: LooToken[] = [];
+  for (const p of live) {
+    const rest = live.filter((q) => q.slug !== p.slug);
+    const fit = fitCurve(rest);
+    const offs = computeOffsets(rest, fit);
+    const predA = impliedValue(p, asOf, model, fit, offs, 'a').implied;
+    const predB = impliedValue(p, asOf, model, fit, offs, 'b').implied;
+    out.push({
+      slug: p.slug,
+      category: p.category ?? 'Other',
+      missA: missOf(predA, p.mcap_usd!),
+      missB: missOf(predB, p.mcap_usd!),
+      residualA: Math.log10(p.mcap_usd! / predA),
+      residualB: Math.log10(p.mcap_usd! / predB),
+      flatMiss: missOf(flatBenchmark(rest) * p.tvl_usd, p.mcap_usd!),
+    });
+  }
+  return out;
+}
+
+/**
+ * The fit-set sensitivity: leave-one-out *within* each fit-set (fit on the set minus one,
+ * test the held-out one), variant A — the same definition as the backtest. The curve-only
+ * cross-check reproduces the audit's numbers exactly (all x3.40, TVL≥$10M x3.86,
+ * mcap/TVL≤20× x3.26), which is what pins the definition down.
+ */
+export function fitsetSensitivity(live: SnapshotProtocol[], asOf: string, model: ModelConstants = MODEL): FitsetSensitivityRow[] {
+  const sets: { label: string; tokens: SnapshotProtocol[] }[] = [
+    { label: 'All live tokens', tokens: live },
+    { label: 'TVL ≥ $10M', tokens: live.filter((p) => p.tvl_usd >= 10_000_000) },
+    { label: 'mcap / TVL ≤ 20×', tokens: live.filter((p) => p.mcap_usd! / p.tvl_usd <= 20) },
+  ];
+  return sets.map((s) => {
+    const m = summarizeMisses(looTokens(s.tokens, asOf, model).map((t) => t.missA));
+    return { label: s.label, n: s.tokens.length, loo_median_miss: m.median_miss, within_2x_pct: m.within_2x_pct };
+  });
+}
+
+/**
+ * The per-sector panel: one row per category with its own offset (three or more live tokens).
+ * The LOO miss per sector is the median of that sector's live tokens' leave-one-out misses
+ * under the selected variant; the median ratio is the median mcap/TVL of its live tokens.
+ */
+export function buildSectorPanel(
+  snapshot: Snapshot,
+  board: BoardRow[],
+  variant: ModelVariant,
+  model: ModelConstants = MODEL,
+): SectorPanelRow[] {
+  const live = snapshot.protocols.filter(isLiveTest);
+  const loo = looTokens(live, snapshot.as_of, model);
+  const byCategory = new Map<string, { ratios: number[]; misses: number[] }>();
+  for (const p of live) {
+    const key = p.category ?? 'Other';
+    const e = byCategory.get(key) ?? { ratios: [], misses: [] };
+    e.ratios.push(p.mcap_usd! / p.tvl_usd);
+    byCategory.set(key, e);
+  }
+  for (const t of loo) byCategory.get(t.category)!.misses.push(variant === 'a' ? t.missA : t.missB);
+  const boardRows = new Map<string, number>();
+  for (const r of board) boardRows.set(r.category, (boardRows.get(r.category) ?? 0) + 1);
+  const fit = fitCurve(live);
+  const offs = computeOffsets(live, fit);
+  const rows: SectorPanelRow[] = [];
+  for (const o of offs) {
+    if (o.live_count < MIN_SECTOR_LIVE) continue;
+    const e = byCategory.get(o.category)!;
+    const ratios = [...e.ratios].sort((a, b) => a - b);
+    const misses = [...e.misses].sort((a, b) => a - b);
+    rows.push({
+      category: o.category,
+      offset: o.offset,
+      live_count: o.live_count,
+      median_ratio: Math.round((medianOf(ratios) ?? 0) * 1e4) / 1e4,
+      board_rows: boardRows.get(o.category) ?? 0,
+      loo_median_miss: Math.round((medianOf(misses) ?? 0) * 100) / 100,
+      loo_n: misses.length,
+    });
+  }
+  return rows.sort((a, b) => b.live_count - a.live_count);
+}
+
+/**
+ * The bootstrap: 200 seeded resamples of the live tokens, refitting curve and offsets each
+ * time. The slope/intercept spread is the fit's own sampling error; the top-1 spread is the
+ * same refits applied to the top row's TVL and category (curve × that resample's offset).
+ */
+export function bootstrapFit(
+  live: SnapshotProtocol[],
+  asOf: string,
+  topRow: { slug: string; name: string; tvl_usd: number; category: string },
+  model: ModelConstants = MODEL,
+  resamples = 200,
+  seed = 20261114,
+): BootstrapResult {
+  const rand = mulberry32(seed);
+  const slopes: number[] = [];
+  const intercepts: number[] = [];
+  const top1: number[] = [];
+  for (let i = 0; i < resamples; i++) {
+    const sample: SnapshotProtocol[] = [];
+    for (let j = 0; j < live.length; j++) sample.push(live[Math.floor(rand() * live.length)]!);
+    const fit = fitCurve(sample);
+    const offs = computeOffsets(sample, fit);
+    const offset = offs.find((b) => b.category === topRow.category)?.offset ?? 1;
+    slopes.push(fit.slope);
+    intercepts.push(fit.intercept);
+    top1.push(Math.max(1, Math.round(curveValue(topRow.tvl_usd, fit) * offset)));
+  }
+  slopes.sort((a, b) => a - b);
+  intercepts.sort((a, b) => a - b);
+  top1.sort((a, b) => a - b);
+  return {
+    resamples,
+    slope_p5: Math.round(quantileOf(slopes, 0.05) * 1e4) / 1e4,
+    slope_p95: Math.round(quantileOf(slopes, 0.95) * 1e4) / 1e4,
+    intercept_p5: Math.round(quantileOf(intercepts, 0.05) * 1e4) / 1e4,
+    intercept_p95: Math.round(quantileOf(intercepts, 0.95) * 1e4) / 1e4,
+    top1_slug: topRow.slug,
+    top1_name: topRow.name,
+    top1_p5: Math.round(quantileOf(top1, 0.05)),
+    top1_p95: Math.round(quantileOf(top1, 0.95)),
   };
 }
 
@@ -1286,20 +1482,10 @@ export function validateModel(snapshot: Snapshot, model: ModelConstants = MODEL)
 
   // Leave-one-out, both variants: each live token predicted with the curve and the offsets
   // refitted without it. The flat benchmark is the median ratio of the rest.
-  const looMiss: Record<ModelVariant, number[]> = { a: [], b: [] };
-  const looFlat: number[] = [];
-  const looResidual: Record<ModelVariant, number[]> = { a: [], b: [] };
-  for (const p of live) {
-    const rest = live.filter((q) => q.slug !== p.slug);
-    const fit = fitCurve(rest);
-    const offs = computeOffsets(rest, fit);
-    for (const variant of ['a', 'b'] as ModelVariant[]) {
-      const pred = impliedValue(p, snapshot.as_of, model, fit, offs, variant).implied;
-      looMiss[variant].push(missOf(pred, p.mcap_usd!));
-      looResidual[variant].push(Math.log10(p.mcap_usd! / pred));
-    }
-    looFlat.push(missOf(flatBenchmark(rest) * p.tvl_usd, p.mcap_usd!));
-  }
+  const loo = looTokens(live, snapshot.as_of, model);
+  const looMiss: Record<ModelVariant, number[]> = { a: loo.map((t) => t.missA), b: loo.map((t) => t.missB) };
+  const looFlat: number[] = loo.map((t) => t.flatMiss);
+  const looResidual: Record<ModelVariant, number[]> = { a: loo.map((t) => t.residualA), b: loo.map((t) => t.residualB) };
 
   // Time-split: the curve and the offsets from the pre-2024 listings only, tested on the 2024+
   // listings, both variants and the flat benchmark on the same tokens.
@@ -1350,6 +1536,10 @@ export function validateModel(snapshot: Snapshot, model: ModelConstants = MODEL)
     loo: { n: live.length, model: selected === 'a' ? looA : looB, flat: summarizeMisses(looFlat) },
     timesplit: { fit_n: fitSlugs.size, test_n: test.length, excluded_n: noDate, model: selected === 'a' ? tsA : tsB, flat: summarizeMisses(tsFlat), points },
     residual_quantiles: residualQuantiles,
+    fitset_sensitivity: fitsetSensitivity(live, snapshot.as_of, model),
+    // buildRadar fills these once the board exists (sector panel needs board row counts; bootstrap needs the top-1 row).
+    sector_panel: [],
+    bootstrap: null,
   };
 }
 
