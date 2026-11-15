@@ -80,6 +80,8 @@ a { color: var(--accent); }
 .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: var(--step-6); padding: var(--step-6) 0 var(--step-5); align-items: start; }
 .hero-copy p { margin-top: var(--step-4); max-width: 60ch; color: var(--ink-soft); }
 .hero-copy p.note { font-size: 13px; color: var(--muted); }
+/* The hero's validation line: one honest sentence of backtest, so the board screenshot carries it. */
+.valid-line { padding: var(--step-2) var(--step-3); border-left: 3px solid var(--lime); background: var(--lime-soft); border-radius: var(--radius-control); font-size: 13px; }
 .scatter-card { padding: var(--step-4); }
 .scatter-card figcaption { font-size: 11px; letter-spacing: 0.12em; color: var(--muted); margin-bottom: var(--step-2); }
 .scatter-card svg { display: block; width: 100%; height: auto; }
@@ -260,11 +262,17 @@ tbody tr[data-selected="true"] { background: var(--lime-soft); }
 .econ-label { font-size: 10px; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
 .econ-strip b { font-size: 14px; }
 .ticket { display: flex; flex-wrap: wrap; gap: var(--step-2) var(--step-5); background: var(--paper-deep); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--step-3) var(--step-4); font-size: 14px; }
-.steps { margin: 0; padding-left: var(--step-5); display: grid; gap: var(--step-3); }
-.steps li { padding-left: var(--step-1); }
-.steps li::marker { font-family: var(--font-serif); font-weight: 700; color: var(--accent); }
-.steps b { display: block; font-weight: 500; }
-.cost { color: var(--muted); font-size: 12px; font-family: var(--font-num); }
+
+/* Tables inside the detail modal: the costed plan, the net sensitivity, the peers. Rows are
+   facts, not links: no pointer, no hover wash. */
+.detail-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.detail-table th, .detail-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.detail-table thead th { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+.detail-table tbody tr { cursor: default; }
+.detail-table tbody tr:hover { background: transparent; }
+.detail-table tfoot td { border-top: 2px solid var(--border-strong); border-bottom: 0; font-weight: 700; }
+.plan-step { font-weight: 700; white-space: nowrap; }
+.plan-action { color: var(--ink-soft); }
 
 @media (max-width: 1100px) {
   .hero { grid-template-columns: 1fr; }

@@ -117,11 +117,17 @@ export const EARLY_ROWS = 160;
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
 
-/** A farm step: the action, what it costs, and how long it takes. */
+/** A farm step: the action, what it costs, and how long it takes — in words and in numbers. */
 export interface FarmStep {
+  /** The step's phase: Fund, Verify, Mint, Upkeep, Risk, Claim, Exit. */
+  label: string;
   text: string;
   cost: string;
   time: string;
+  /** The gas this step spends, in dollars: the only dollars the plan's gas total counts. */
+  cost_usd: number;
+  /** The hands-on minutes this step takes: the Risk step takes days, not minutes. */
+  minutes: number;
 }
 
 /** One sector's offset from the fitted curve: how its live tokens sit against the curve. */
@@ -172,6 +178,14 @@ export interface BoardRow {
   farm_steps: string[];
 }
 
+/** One row of the net-sensitivity table: the net at one deposit under three drops of the launch value. */
+export interface TierNetRow {
+  deposit_usd: number;
+  net_drop_05: number;
+  net_drop_10: number;
+  net_drop_20: number;
+}
+
 /** One row's farm economics at a $1,000 deposit: what the launch would pay, what it costs, and the verdict. */
 export interface FarmEconomics {
   /** The deposit the economics are priced at. */
@@ -215,6 +229,14 @@ export interface RadarRow {
   implied_value_usd: number;
   sensitivity: LaunchSensitivity;
   economics: FarmEconomics;
+  /** The row's farm plan: seven steps, each with its gas cost and hands-on minutes. */
+  plan: FarmStep[];
+  /** The net at $1K / $10K / $100K deposits under a 5% / 10% / 20% drop in the launch value. */
+  tier_net: TierNetRow[];
+  /** The three live tokens nearest this row by TVL. */
+  peers: LivePeer[];
+  /** How many of the three peers share this row's category. */
+  peers_same_category: number;
   curve_value_usd: number;
   sector_offset: number;
   growth_multiplier: number;
@@ -222,6 +244,18 @@ export interface RadarRow {
   chain_multiplier: number;
   factor_total: number;
   watchlist: boolean;
+}
+
+/** One of the three live tokens nearest a board row by TVL: the market's own price for something like it. */
+export interface LivePeer {
+  slug: string;
+  name: string;
+  tvl_usd: number;
+  mcap_usd: number;
+  /** Market cap over TVL, to four decimals. */
+  ratio: number;
+  /** Whether it shares the row's category. */
+  same_category: boolean;
 }
 
 /** A live-token protocol: it already trades, so the board shows the market's own value, not a model's. */
@@ -667,18 +701,21 @@ function holdDaysFor(age: number | null): number {
 // goes to depositors, pro rata on TVL, so slice = 0.10 x implied x 1000 / TVL.
 // The costs are stated, not hidden. Gas is the plan's WHOLE gas over the
 // hold, summed from the gas the plan's own steps state — not a flat $1.50:
-//   step 1: "under $3 of gas for the first transaction" -> $3, the upper bound
-//   step 2: "about $8 of gas" to set the position up ($4 when the capital is
+//   step 1 (Fund): "under $3 of gas for the first transaction" -> $3, the upper bound
+//   step 2 (Verify): checking the farm costs no gas -> $0
+//   step 3 (Mint): "about $8 of gas" to set the position up ($4 when the capital is
 //           under $150, the plan's own figure for the smaller ticket)
-//   step 3: "about $2 of gas a week" for the weekly action, times the weeks
+//   step 4 (Upkeep): "about $2 of gas a week" for the weekly action, times the weeks
 //           in the hold (ceil(hold / 7))
-//   steps 4-6: no gas — holding, checking and logging spend none.
+//   steps 5-7 (Risk, Claim, Exit): no gas — holding, claiming and logging spend none.
 // That puts the total gas at $17-$25 across the board, by capital and hold.
 // The other cost is the 4% T-bill yield the $1,000 forgoes over the 30 days
 // the plan holds it ($3.29). Hands-on time is the plan's own step times
-// added up: 5 minutes to set up the wallet, 15 to place the position, 10
-// minutes a week for the weekly action over the hold, 10 to check the
-// rewards page, 5 to log it.
+// added up: 5 minutes to fund the wallet, 5 to verify the farm, 10 to place
+// the position, 10 minutes a week for the weekly action over the hold, 10 to
+// claim and 5 to log it. The Risk step holds the position for the hold's days
+// and is checked in the weekly 10 minutes, so it adds no hands-on minutes;
+// its cost is the capital at risk, stated in its text.
 //   net = slice - gas - forgone
 //   FARM when net > 0 (it beats every cost, forgone yield included)
 //   THIN when net <= 0 but slice - gas > 0 (it beats the fees only)
@@ -707,16 +744,40 @@ export const FARM_TBILL_RATE = 0.04;
 export const FARM_TBILL_DAYS = 30;
 
 /**
+ * The seven steps' numbers, from the capital and the hold alone: the gas each step spends and
+ * the hands-on minutes it takes. The gas sums to the plan's whole gas over the hold and the
+ * minutes sum to the plan's hands-on time, so the farm economics and the plan table read one
+ * set of numbers and cannot disagree: the totals the modal shows are the totals the verdict
+ * is judged against. The setup is $8 ($4 when the capital is under $150) and the weekly
+ * action is $2 a week over ceil(hold / 7) weeks; the Risk step spends no gas and no extra
+ * minutes — it holds the position for the hold's days and is checked in the weekly action's
+ * 10 minutes.
+ */
+export function farmStepNumbers(capital: number, hold: number): { cost_usd: number; minutes: number }[] {
+  const weeks = Math.ceil(hold / 7);
+  const setup = capital >= 150 ? 8 : 4;
+  return [
+    { cost_usd: FARM_GAS_FIRST_TX_USD, minutes: 5 }, // Fund
+    { cost_usd: 0, minutes: 5 }, // Verify
+    { cost_usd: setup, minutes: 10 }, // Mint
+    { cost_usd: FARM_GAS_WEEKLY_USD * weeks, minutes: 10 * weeks }, // Upkeep
+    { cost_usd: 0, minutes: 0 }, // Risk
+    { cost_usd: 0, minutes: 10 }, // Claim
+    { cost_usd: 0, minutes: 5 }, // Exit
+  ];
+}
+
+/**
  * The plan's whole gas over the hold, summed from the gas the plan's own steps state: $3 for the
  * first transaction (the plan says "under $3"), $8 to set the position up ($4 when the capital is
- * under $150), and $2 a week for the weekly action over the hold. Steps 4-6 spend no gas. The
+ * under $150), and $2 a week for the weekly action over the hold. Steps 5-7 spend no gas. The
  * total is $17-$25 across the board, by capital and hold — and it is the gas the verdict is
  * judged against, not a flat $1.50.
  */
 export function planGasUsd(capital: number, hold: number): { total: number; setup: number; weeks: number; detail: string } {
   const setup = capital >= 150 ? 8 : 4;
   const weeks = Math.ceil(hold / 7);
-  const total = FARM_GAS_FIRST_TX_USD + setup + FARM_GAS_WEEKLY_USD * weeks;
+  const total = farmStepNumbers(capital, hold).reduce((a, s) => a + s.cost_usd, 0);
   return { total, setup, weeks, detail: `$${FARM_GAS_FIRST_TX_USD} first tx + $${setup} setup + $${FARM_GAS_WEEKLY_USD}/wk × ${weeks} wks` };
 }
 
@@ -733,7 +794,9 @@ export function farmEconomics(implied: number, tvl: number, age: number | null):
   const gas = planGasUsd(capital, hold);
   const forgone = round2((FARM_DEPOSIT_USD * FARM_TBILL_RATE * FARM_TBILL_DAYS) / 365);
   const net = round2(slice - gas.total - forgone);
-  const minutes = 5 + 15 + 10 * gas.weeks + 10 + 5;
+  // The hands-on time is the plan's own step times added up, from the same numbers the plan
+  // table shows — not a second accounting.
+  const minutes = farmStepNumbers(capital, hold).reduce((a, s) => a + s.minutes, 0);
   const hours = round2(minutes / 60);
   const verdict: FarmEconomics['verdict'] = net > 0 ? 'FARM' : slice - gas.total > 0 ? 'THIN' : 'SKIP';
   return {
@@ -796,47 +859,141 @@ function weeklyFor(p: SnapshotProtocol, capital: number, chain: string): string 
 }
 
 /**
- * A protocol's farm plan: six steps, each an action with a cost and a time. The plan is derived from
- * the protocol's own record (category, chains, TVL, age), never from a hand-written list of names.
+ * A protocol's farm plan: seven steps, each an action with a cost and a time, in words and in
+ * numbers. The phases are Fund, Verify, Mint, Upkeep, Risk, Claim and Exit: the wallet is
+ * funded, the farm is checked before any deposit, the position is placed, the weekly action
+ * keeps it qualifying, the hold is watched for risk, the claim is taken from the protocol's
+ * own link, and the log closes the position. Every step's dollars and minutes come from
+ * farmStepNumbers, so the plan table's totals are the farm economics' gas and hands-on time.
+ * The plan is derived from the protocol's own record (category, chains, TVL, age), never
+ * from a hand-written list of names.
  */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
   const capital = capitalFor(p);
   const hold = holdDaysFor(age);
+  const numbers = farmStepNumbers(capital, hold);
   const action = actionFor(p, capital, chain);
   const weekly = weeklyFor(p, capital, chain);
-  return [
+  const defs = [
     {
+      label: 'Fund',
       text: `Use a fresh wallet that holds only the $${capital} you plan to farm, and keep its seed phrase offline.`,
       cost: 'under $3 of gas for the first transaction',
       time: '5 minutes',
     },
     {
-      text: action,
-      cost: `$${capital} of capital and about $${capital >= 150 ? 8 : 4} of gas`,
-      time: '15 minutes to set up',
+      label: 'Verify',
+      text: `Check ${p.name}'s own site before you deposit: confirm the farm is live, the contract matches the address the site publishes, and its points or rewards page exists.`,
+      cost: 'no gas to check',
+      time: '5 minutes',
     },
     {
+      label: 'Mint',
+      text: action,
+      cost: `$${capital} of capital and about $${capital >= 150 ? 8 : 4} of gas`,
+      time: '10 minutes to place the position',
+    },
+    {
+      label: 'Upkeep',
       text: weekly,
       cost: 'about $2 of gas a week',
       time: '10 minutes a week',
     },
     {
-      text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
+      label: 'Risk',
+      text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot, and check it each week alongside the weekly action: if the pool leaves its range, the peg slips or the policy lapses, unwind instead of topping up.`,
       cost: `the $${capital} stays in the position`,
       time: `${hold} days`,
     },
     {
-      text: `Before you withdraw, open ${p.name}'s own points or rewards page from the protocol's own site and claim only from the link it publishes.`,
+      label: 'Claim',
+      text: `Before you withdraw, open ${p.name}'s own points or rewards page from the protocol's own site and claim only from the link it publishes; never pay to claim.`,
       cost: 'no fee to check, and never pay to claim',
       time: '10 minutes',
     },
     {
+      label: 'Exit',
       text: `Write the wallet, the dates and every transaction hash in a farm log so you can repeat the position or unwind it.`,
       cost: 'nothing but the log',
       time: '5 minutes',
     },
   ];
+  return defs.map((d, i) => ({ ...d, cost_usd: numbers[i]!.cost_usd, minutes: numbers[i]!.minutes }));
+}
+
+// ---------------------------------------------------------------------------
+// Net sensitivity by deposit: what the farm pays at a bigger deposit, and
+// what a smaller launch does to it.
+// The slice scales linearly with the deposit — 10% of the launch, pro rata
+// on TVL — and the forgone T-bill yield scales with the deposit at the same
+// 30-day convention as the $1,000 economics. The gas is the plan's gas: a
+// transaction costs the same whether it moves $1,000 or $100,000, so it does
+// not grow with the deposit. At $1,000 with no drop the net is the
+// economics' own net_usd exactly: the table is the same arithmetic, not a
+// second one. A bigger deposit does not rescue a bad farm: the slice grows
+// with the deposit, but so does the forgone yield, and the gas stays flat.
+// ---------------------------------------------------------------------------
+
+/** The deposits the net-sensitivity table prices: $1K, $10K and $100K. */
+export const TIER_DEPOSITS_USD = [1000, 10_000, 100_000];
+
+/** The launch-value drops the net-sensitivity table prices: 5%, 10% and 20%. */
+export const TIER_DROPS = [0.05, 0.1, 0.2];
+
+/**
+ * One row's net at $1K, $10K and $100K deposits under a 5%, 10% and 20% drop in the launch
+ * value: net = slice(deposit) x (1 - drop) - gas - forgone(deposit). Deterministic.
+ */
+export function tierNet(implied: number, tvl: number, economics: FarmEconomics): TierNetRow[] {
+  return TIER_DEPOSITS_USD.map((deposit) => {
+    const slice = tvl > 0 ? round2((FARM_SLICE_SHARE * implied * deposit) / tvl) : 0;
+    const forgone = round2((deposit * FARM_TBILL_RATE * FARM_TBILL_DAYS) / 365);
+    const net = (drop: number): number => round2(slice * (1 - drop) - economics.gas_usd - forgone);
+    return { deposit_usd: deposit, net_drop_05: net(TIER_DROPS[0]!), net_drop_10: net(TIER_DROPS[1]!), net_drop_20: net(TIER_DROPS[2]!) };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Nearest traded peers: the live tokens a row is priced against.
+// A row's implied value comes from a curve fitted on the live tokens, so the
+// reader should see which live tokens sit nearest to it: the three with the
+// closest TVL, same category first. Distance is the absolute log10 TVL ratio,
+// so a token ten times the size is as far as one a tenth the size; ties break
+// by slug, so the choice is deterministic. When the row's own category has
+// fewer than three live tokens the rest come from across categories, and the
+// dashboard says so — the count is carried with the peers, not hidden.
+// ---------------------------------------------------------------------------
+
+/**
+ * The three live tokens nearest a row by TVL, same category first, with how many of the three
+ * share the row's category. The peers are the snapshot's own live tokens, read at run time.
+ */
+export function nearestPeers(
+  row: SnapshotProtocol,
+  live: SnapshotProtocol[],
+): { peers: LivePeer[]; same_category: number } {
+  const distance = (p: SnapshotProtocol): number => Math.abs(Math.log10(p.tvl_usd / row.tvl_usd));
+  const byDistance = (a: SnapshotProtocol, b: SnapshotProtocol): number =>
+    distance(a) - distance(b) || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0);
+  const category = row.category ?? 'Other';
+  const same = live.filter((p) => (p.category ?? 'Other') === category).sort(byDistance);
+  const picked = same.slice(0, 3);
+  if (picked.length < 3) {
+    const rest = live.filter((p) => !picked.includes(p)).sort(byDistance);
+    picked.push(...rest.slice(0, 3 - picked.length));
+  }
+  return {
+    peers: picked.map((p) => ({
+      slug: p.slug,
+      name: p.name,
+      tvl_usd: p.tvl_usd,
+      mcap_usd: p.mcap_usd!,
+      ratio: Math.round((p.mcap_usd! / p.tvl_usd) * 1e4) / 1e4,
+      same_category: (p.category ?? 'Other') === category,
+    })),
+    same_category: same.slice(0, 3).length,
+  };
 }
 
 /**
@@ -901,7 +1058,21 @@ export function liveRows(snapshot: Snapshot): LiveRow[] {
 }
 
 /** A board row's compact form for data.js, with the farm plan generated in the page. */
-export function radarRow(row: BoardRow): RadarRow {
+export function radarRow(row: BoardRow, live: SnapshotProtocol[]): RadarRow {
+  const economics = farmEconomics(row.implied_value_usd, row.tvl_usd, row.age_days);
+  const protocol: SnapshotProtocol = {
+    slug: row.slug,
+    name: row.name,
+    category: row.category,
+    chains: row.chains,
+    tvl_usd: row.tvl_usd,
+    change_7d: row.change_7d,
+    mcap_usd: row.mcap_usd,
+    listed_at: row.listed_at,
+    gecko_id: row.gecko_id,
+    symbol: row.symbol,
+  };
+  const peers = nearestPeers(protocol, live);
   return {
     rank: row.rank,
     slug: row.slug,
@@ -915,7 +1086,11 @@ export function radarRow(row: BoardRow): RadarRow {
     age_days: row.age_days,
     implied_value_usd: row.implied_value_usd,
     sensitivity: row.sensitivity,
-    economics: farmEconomics(row.implied_value_usd, row.tvl_usd, row.age_days),
+    economics,
+    plan: farmSteps(protocol, row.age_days),
+    tier_net: tierNet(row.implied_value_usd, row.tvl_usd, economics),
+    peers: peers.peers,
+    peers_same_category: peers.same_category,
     curve_value_usd: row.model.curve_value_usd,
     sector_offset: row.model.sector_offset,
     growth_multiplier: row.model.growth_multiplier,
@@ -953,7 +1128,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     set_aside: setAsideGroups(snapshot, board, live),
     global_benchmark: flatBenchmark(liveAll),
     validation,
-    rows: board.map((r) => ({ ...radarRow(r), watchlist: snapshot.watchlist.includes(r.slug) })),
+    rows: board.map((r) => ({ ...radarRow(r, liveAll), watchlist: snapshot.watchlist.includes(r.slug) })),
     live,
   };
   return { board, radar };

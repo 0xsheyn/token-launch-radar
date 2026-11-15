@@ -82,10 +82,9 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  // The farm plan is the same derivation main.ts writes to board.json: category, chains, TVL and age
-  // decide the action, the weekly action, the capital, the hold and every cost and time. No name is
-  // special-cased.
-  function chainOf(p) { return p.chains && p.chains.length > 0 ? p.chains[0] : 'its main chain'; }
+  // The capital tier and the hold, from the row's own TVL and age: the same rules main.ts
+  // prices the farm economics with. Only a fallback here — every board row carries its own
+  // economics in data.js; these cover a row that somehow has none.
   function capitalFor(p) {
     if (p.tvl_usd >= 5e9) return 250;
     if (p.tvl_usd >= 1e9) return 150;
@@ -97,64 +96,6 @@
     if (age < 180) return 60;
     if (age < 365) return 45;
     return 30;
-  }
-  function actionFor(p, capital, chain) {
-    var c = (p.category || '').toLowerCase();
-    var name = p.name;
-    if (c.indexOf('liquid staking') >= 0 || c.indexOf('restak') >= 0) return 'Stake $' + capital + " of the chain's staking asset through " + name + ' on ' + chain + ' and keep the receipt token.';
-    if (c.indexOf('lend') >= 0 || c.indexOf('cdp') >= 0 || c.indexOf('collateral') >= 0 || c.indexOf('borrow') >= 0) return 'Supply $' + capital + ' of USDC to ' + name + ' on ' + chain + ', then borrow $10 against it and repay the loan the same week.';
-    if (c.indexOf('dex') >= 0) return 'Provide $' + capital + " of liquidity to " + name + "'s main pool on " + chain + ' and swap $10 through the pool in the same visit.';
-    if (c.indexOf('yield aggregator') >= 0 || c.indexOf('yield') >= 0) return 'Deposit $' + capital + ' of USDC into a ' + name + ' vault on ' + chain + " and claim the vault's yield once a week.";
-    if (c.indexOf('perpetual') >= 0 || c.indexOf('derivative') >= 0 || c.indexOf('options') >= 0 || c.indexOf('basis') >= 0) return 'Deposit $' + capital + ' of USDC as margin on ' + name + ' on ' + chain + ' and open one small hedged trade.';
-    if (c.indexOf('bridge') >= 0) return 'Bridge $' + capital + ' of USDC to ' + chain + ' through ' + name + ' and use the bridged funds in its app the same day.';
-    if (c.indexOf('prediction') >= 0) return 'Fund $' + capital + ' on ' + name + ' and place one market position on an event at least a week out.';
-    if (c.indexOf('stable') >= 0) return 'Mint or deposit $' + capital + ' of the stable asset through ' + name + ' on ' + chain + " and hold it in the protocol's own app.";
-    if (c.indexOf('rwa') >= 0) return 'Mint $' + capital + " of " + name + "'s yield-bearing asset on " + chain + ' and hold it in the wallet you farm with.';
-    if (c.indexOf('insurance') >= 0) return 'Buy $' + capital + ' of cover from ' + name + ' on ' + chain + ' and keep the policy active for the full hold.';
-    if (c.indexOf('index') >= 0) return 'Buy $' + capital + " of " + name + "'s index token on " + chain + ' and hold it in the farming wallet.';
-    if (c.indexOf('privacy') >= 0) return 'Deposit $' + capital + ' of USDC into ' + name + "'s shielded pool on " + chain + ' and withdraw it only after the hold.';
-    if (c.indexOf('curator') >= 0 || c.indexOf('allocator') >= 0) return 'Deposit $' + capital + ' into a ' + name + ' vault on ' + chain + ' and keep the vault shares for the full hold.';
-    if (c.indexOf('liquidity manager') >= 0) return 'Deposit $' + capital + " into " + name + "'s managed liquidity position on " + chain + ' and leave the range alone.';
-    if (c.indexOf('nft') >= 0) return 'Lend $' + capital + ' of USDC against an NFT on ' + name + ' on ' + chain + ' and keep the loan open for the full hold.';
-    return 'Deposit $' + capital + ' of USDC into ' + name + ' on ' + chain + ' and keep the position open.';
-  }
-  function weeklyFor(p, capital, chain) {
-    var c = (p.category || '').toLowerCase();
-    var name = p.name;
-    if (c.indexOf('liquid staking') >= 0 || c.indexOf('restak') >= 0) return "Restake the week's rewards through " + name + ' on ' + chain + ' so the receipt balance grows.';
-    if (c.indexOf('lend') >= 0 || c.indexOf('cdp') >= 0 || c.indexOf('collateral') >= 0 || c.indexOf('borrow') >= 0) return 'Borrow $10 against the supply on ' + name + ' and repay it the same week, every week.';
-    if (c.indexOf('dex') >= 0) return 'Swap $10 through ' + name + "'s main pool on " + chain + ' once a week.';
-    if (c.indexOf('yield aggregator') >= 0 || c.indexOf('yield') >= 0) return "Claim the vault's yield on " + name + ' once a week and redeposit it.';
-    if (c.indexOf('perpetual') >= 0 || c.indexOf('derivative') >= 0 || c.indexOf('options') >= 0 || c.indexOf('basis') >= 0) return 'Open and close one small trade on ' + name + ' each week, never more than $10 of margin.';
-    if (c.indexOf('bridge') >= 0) return 'Bridge $10 through ' + name + ' to ' + chain + ' once a week and use it in the app.';
-    if (c.indexOf('prediction') >= 0) return 'Place one small position on a new ' + name + ' market each week.';
-    if (c.indexOf('stable') >= 0) return "Move $10 in and out of " + name + "'s stable asset on " + chain + ' once a week.';
-    if (c.indexOf('rwa') >= 0) return 'Top up the ' + name + ' position by $10 once a week while the hold runs.';
-    if (c.indexOf('privacy') >= 0) return 'Make one shielded deposit of $10 on ' + name + ' each week.';
-    if (c.indexOf('curator') >= 0 || c.indexOf('allocator') >= 0) return 'Top up the ' + name + ' vault by $10 once a week while the hold runs.';
-    if (c.indexOf('index') >= 0) return 'Top up the ' + name + ' index position by $10 once a week.';
-    if (c.indexOf('insurance') >= 0) return 'Review the ' + name + ' policy once a week and keep the cover active.';
-    if (c.indexOf('liquidity manager') >= 0) return "Check the " + name + " position's range once a week and leave it alone unless it is out of range.";
-    return 'Make one qualifying action each week on ' + name + ', such as a deposit, a swap or a vote, and keep the receipts.';
-  }
-  function stepText(step) {
-    var s = step.text + ' Cost: ' + step.cost + '. Time: ' + step.time + '.';
-    if (s.length > 600) s = s.slice(0, 596) + '...';
-    if (s.length < 20) s = s + " Hold the position and check the protocol's own page.";
-    return s;
-  }
-  function farmSteps(p) {
-    var chain = chainOf(p);
-    var capital = capitalFor(p);
-    var hold = holdDaysFor(p.age_days);
-    return [
-      { text: 'Use a fresh wallet that holds only the $' + capital + ' you plan to farm, and keep its seed phrase offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
-      { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and about $' + (capital >= 150 ? 8 : 4) + ' of gas', time: '15 minutes to set up' },
-      { text: weeklyFor(p, capital, chain), cost: 'about $2 of gas a week', time: '10 minutes a week' },
-      { text: 'Hold the position for at least ' + hold + ' days so the activity is counted in more than one snapshot.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
-      { text: "Before you withdraw, open " + p.name + "'s own points or rewards page from the protocol's own site and claim only from the link it publishes.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
-      { text: 'Write the wallet, the dates and every transaction hash in a farm log so you can repeat the position or unwind it.', cost: 'nothing but the log', time: '5 minutes' }
-    ].map(stepText);
   }
 
   // Board-wide figures, all computed live from data.js: no number on the page is typed in by hand.
@@ -297,6 +238,25 @@
   }
 
   function hero() {
+    // One honest sentence of backtest, in the hero, so the board screenshot carries it: both
+    // numbers, model and flat, read from data.js — never typed in here.
+    var V = DATA.validation;
+    var looBeat = V.loo.model.median_miss < V.loo.flat.median_miss;
+    var tsBeat = V.timesplit.model.median_miss < V.timesplit.flat.median_miss;
+    var beatText = looBeat && tsBeat ? 'beats the flat benchmark on both tests'
+      : looBeat ? 'beats the flat benchmark leave-one-out but not on the time split'
+      : tsBeat ? 'beats the flat benchmark on the time split but not leave-one-out'
+      : 'does not beat the flat benchmark on either test';
+    var validLine = el('p', { class: 'valid-line' },
+      el('b', { text: 'Blind test: ' }),
+      'leave-one-out ',
+      el('b', { class: 'pos', text: 'x' + V.loo.model.median_miss.toFixed(2) }),
+      ' vs flat x' + V.loo.flat.median_miss.toFixed(2),
+      ' \u00b7 time-split ',
+      el('b', { class: 'pos', text: 'x' + V.timesplit.model.median_miss.toFixed(2) }),
+      ' vs flat x' + V.timesplit.flat.median_miss.toFixed(2),
+      ' — the curve ' + beatText + '.'
+    );
     return el('section', { class: 'hero' },
       el('div', { class: 'hero-copy' },
         el('h1', null,
@@ -305,6 +265,7 @@
           el('em', { text: 'The fitted size curve prices them at ' + fmtUsd(TOTAL_IMPLIED) + '.' })
         ),
         el('p', { text: 'Every protocol the feed tracks that records no token and is nobody else\u2019s product, priced from the ones that do: market cap grows slower than TVL — the curve fitted to the snapshot\u2019s ' + DATA.fit.n + ' trading protocols says a tenfold TVL buys about ' + Math.pow(10, DATA.fit.slope).toFixed(1) + 'x the market cap — so each sector\u2019s offset around that curve prices what is still to come.' }),
+        validLine,
         el('p', { class: 'note', text: 'Off-white is the snapshot\u2019s record. Lime is this radar\u2019s estimate. A protocol records no token when DefiLlama carries no CoinGecko id and no symbol for it; a protocol on the list may still have a token its record does not carry, so the radar says \u201crecords no token\u201d, never \u201chas none\u201d.' })
       ),
       scatter()
@@ -337,7 +298,7 @@
         el('div', { class: 'top-card-sub', text: (r.category || 'Other') + ' \u00b7 ' + (r.chains || []).slice(0, 2).join(', ') + ((r.chains || []).length > 2 ? ' +' + ((r.chains || []).length - 2) : '') }),
         el('div', { class: 'top-card-value', text: fmtUsd(r.implied_value_usd) }),
         el('div', { class: 'top-card-mult', text: fmtMult(r.implied_value_usd / r.tvl_usd) + ' \u00b7 ' + fmtUsd(r.tvl_usd) + ' TVL' }),
-        el('div', { class: 'top-card-ticket', text: '$' + (e ? e.capital_usd : capitalFor(r)) + ' ticket \u00b7 ' + (e ? e.hold_days : holdDaysFor(r.age_days)) + '-day hold \u00b7 6 steps' }),
+        el('div', { class: 'top-card-ticket', text: '$' + (e ? e.capital_usd : capitalFor(r)) + ' ticket \u00b7 ' + (e ? e.hold_days : holdDaysFor(r.age_days)) + '-day hold \u00b7 ' + (r.plan ? r.plan.length : 7) + ' steps' }),
         e ? el('div', { class: 'top-card-verdict' }, verdictTag(e.verdict), el('span', { class: e.net_usd >= 0 ? 'pos' : 'neg', text: ' ' + fmtSigned(e.net_per_hour_usd) + ' net of all costs' })) : null
       );
     });
@@ -639,7 +600,8 @@
           el('li', { text: 'Slice: 10% of the launch goes to depositors, pro rata on TVL — slice = 0.10 \u00d7 implied \u00d7 $1,000 / TVL, at a $1,000 deposit.' }),
           el('li', { text: 'Gas: the plan\u2019s whole gas over the hold — $3 for the first transaction, $8 to set the position up ($4 when the capital is under $150), $2 a week for the weekly action — ' + fmtMoney(GAS_MIN) + ' to ' + fmtMoney(GAS_MAX) + ' across the board, by capital and hold. Each row\u2019s own total is in its detail view.' }),
           el('li', { text: 'Forgone: the 4% T-bill yield on the $1,000 over the 30 days the plan holds it — $3.29.' }),
-          el('li', { text: 'Hands-on: the plan\u2019s own step times added up — 5 minutes to set up the wallet, 15 to place the position, 10 minutes a week for the weekly action over the hold, 10 to check the rewards page, 5 to log it.' }),
+          el('li', { text: 'Hands-on: the plan\u2019s own step times added up — 5 minutes to fund the wallet, 5 to verify the farm, 10 to place the position, 10 minutes a week for the weekly action over the hold, 10 to claim and 5 to log it. The Risk step holds the position for the hold\u2019s days and is checked in the weekly 10 minutes.' }),
+          el('li', { text: 'Costed plan: every step of the farm plan states its gas and its minutes in the protocol\u2019s detail view, and the totals are the gas and hands-on time above. The net at $1K, $10K and $100K deposits under a 5%, 10% and 20% drop in the launch value is in the same view.' }),
           el('li', { text: 'Sensitivity: the model\u2019s own leave-one-out error — the P10\u2013P90 range of log10(actual / predicted) over the ' + V.live_n + ' live tokens, priced around each row\u2019s implied value. A wide range means the model itself misses widely on tokens like this one.' })
         )
       )
@@ -780,7 +742,7 @@
     state.selected = slug;
     writeHash();
     dialog.textContent = '';
-    var steps = farmSteps(row);
+    var steps = row.plan || [];
     var e = row.economics;
     var recomputed = impliedOf(row, DATA.fit);
     var off = (DATA.sector_offsets || []).filter(function (b) { return b.category === (row.category || 'Other'); })[0];
@@ -885,24 +847,108 @@
       )
     );
 
+    // The farm plan as a costed table: seven steps, each with its gas and its minutes, and a
+    // totals row that must equal the economics below — the gas total and the hands-on time are
+    // the same numbers, summed from the same steps, not a second accounting.
+    var planGas = steps.reduce(function (a, s) { return a + (s.cost_usd || 0); }, 0);
+    var planMin = steps.reduce(function (a, s) { return a + (s.minutes || 0); }, 0);
+    var planBody = el('tbody');
+    steps.forEach(function (s, i) {
+      planBody.appendChild(el('tr', null,
+        el('td', { class: 'num', text: String(i + 1) }),
+        el('td', { class: 'plan-step', text: s.label || '' }),
+        el('td', { class: 'plan-action', text: s.text || '' }),
+        el('td', { class: 'num', text: fmtMoney(s.cost_usd) }),
+        el('td', { class: 'num', text: s.time || '' })
+      ));
+    });
     var plan = el('section', { class: 'detail-section' },
-      el('h3', { text: 'Farm plan \u00b7 ' + (row.category || 'Other') }),
-      el('ol', { class: 'steps' }, steps.map(function (s) {
-        var at = s.indexOf(' Cost: ');
-        var action = at >= 0 ? s.slice(0, at) : s;
-        var tail = at >= 0 ? s.slice(at + 1) : '';
-        return el('li', null, el('b', { text: action }), el('span', { class: 'cost', text: tail }));
-      }))
+      el('h3', { text: 'Farm plan \u00b7 ' + (row.category || 'Other') + ' — costed, step by step' }),
+      el('div', { class: 'table-wrap' },
+        el('table', { class: 'detail-table' },
+          el('thead', null, el('tr', null,
+            el('th', { scope: 'col', text: '#' }),
+            el('th', { scope: 'col', text: 'Step' }),
+            el('th', { scope: 'col', text: 'Action' }),
+            el('th', { scope: 'col', text: 'Gas' }),
+            el('th', { scope: 'col', text: 'Time' }))),
+          planBody,
+          el('tfoot', null, el('tr', null,
+            el('td', { text: '' }),
+            el('td', { text: 'Total' }),
+            el('td', { text: steps.length + ' steps \u00b7 $' + (e ? e.capital_usd : capitalFor(row)) + ' of capital stays in the position' }),
+            el('td', { class: 'num', text: fmtMoney(planGas) }),
+            el('td', { class: 'num', text: planMin + ' min' })))
+        )
+      ),
+      el('p', { class: 'sub', text: 'Gas and hands-on time, summed from the steps above — the same ' + fmtMoney(planGas) + ' and ' + (planMin / 60).toFixed(2) + ' h the farm economics below prices. The Risk step holds the position for the hold\u2019s ' + (e ? e.hold_days : holdDaysFor(row.age_days)) + ' days; its weekly check is inside the Upkeep step\u2019s 10 minutes a week, so it adds no gas and no extra minutes.' })
+    );
+
+    // Net at bigger deposits and smaller launches: the slice scales with the deposit, the
+    // forgone yield scales with it too, and the gas does not grow with the deposit at all.
+    var tierBody = el('tbody');
+    (row.tier_net || []).forEach(function (t) {
+      function tierCell(v) { return el('td', { class: 'num ' + (v >= 0 ? 'pos' : 'neg'), text: fmtSigned(v) }); }
+      tierBody.appendChild(el('tr', null,
+        el('td', { class: 'num', text: '$' + t.deposit_usd.toLocaleString('en-US') }),
+        tierCell(t.net_drop_05), tierCell(t.net_drop_10), tierCell(t.net_drop_20)
+      ));
+    });
+    var tier = el('section', { class: 'detail-section' },
+      el('h3', { text: 'Net if the launch is smaller — or the deposit is bigger' }),
+      el('div', { class: 'table-wrap' },
+        el('table', { class: 'detail-table' },
+          el('thead', null, el('tr', null,
+            el('th', { scope: 'col', text: 'Deposit' }),
+            el('th', { scope: 'col', text: 'Launch \u22125%' }),
+            el('th', { scope: 'col', text: 'Launch \u221210%' }),
+            el('th', { scope: 'col', text: 'Launch \u221220%' }))),
+          tierBody
+        )
+      ),
+      el('p', { class: 'sub', text: 'Net = slice \u00d7 (1 \u2212 drop) \u2212 gas \u2212 forgone. The slice scales with the deposit; the gas is the plan\u2019s ' + (e ? fmtMoney(e.gas_usd) : 'n/a') + ', which does not grow with it; the forgone is the 4% T-bill yield over 30 days, scaled with the deposit. At $1,000 with no drop the net is ' + (e ? fmtSigned(e.net_usd) : 'n/a') + ' — the farm economics below.' })
+    );
+
+    // The live tokens nearest this row by TVL: the market's own prices for protocols like it.
+    var peerBody = el('tbody');
+    (row.peers || []).forEach(function (p) {
+      peerBody.appendChild(el('tr', null,
+        el('td', null, el('b', { text: p.name })),
+        el('td', { class: 'num', text: fmtUsd(p.tvl_usd) }),
+        el('td', { class: 'num', text: fmtUsd(p.mcap_usd) }),
+        el('td', { class: 'num', text: p.ratio.toFixed(4) + 'x' }),
+        el('td', { class: p.same_category ? 'pos' : '', text: p.same_category ? 'same sector' : 'other sector' })
+      ));
+    });
+    var peerNote = (row.peers_same_category || 0) >= 3
+      ? 'All three share this protocol\u2019s category (' + (row.category || 'Other') + '); each is one of the nearest live tokens by TVL.'
+      : 'Only ' + (row.peers_same_category || 0) + ' of the three share this protocol\u2019s category (' + (row.category || 'Other') + '); the rest are the nearest live tokens by TVL across categories.';
+    var peers = el('section', { class: 'detail-section' },
+      el('h3', { text: 'Nearest traded peers' }),
+      el('div', { class: 'table-wrap' },
+        el('table', { class: 'detail-table' },
+          el('thead', null, el('tr', null,
+            el('th', { scope: 'col', text: 'Peer' }),
+            el('th', { scope: 'col', text: 'TVL' }),
+            el('th', { scope: 'col', text: 'Market cap' }),
+            el('th', { scope: 'col', text: 'mcap / TVL' }),
+            el('th', { scope: 'col', text: 'Sector' }))),
+          peerBody
+        )
+      ),
+      el('p', { class: 'sub', text: peerNote + ' These are the live tokens the size curve is fitted on — the market\u2019s own prices for protocols like this one.' })
     );
 
     dialog.appendChild(head);
     dialog.appendChild(bigNums);
+    dialog.appendChild(plan);
+    dialog.appendChild(tier);
+    dialog.appendChild(peers);
+    dialog.appendChild(econ);
+    dialog.appendChild(ticket);
     dialog.appendChild(sliderSection);
     dialog.appendChild(built);
     dialog.appendChild(sens);
-    dialog.appendChild(econ);
-    dialog.appendChild(ticket);
-    dialog.appendChild(plan);
     if (typeof dialog.showModal === 'function') {
       if (!dialog.open) dialog.showModal();
     } else {

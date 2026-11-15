@@ -26,18 +26,23 @@ at `/input/snapshot.json`, scores every pre-token protocol, and writes:
 
 - `board.json` — 200 ranked rows (the 40-protocol watchlist plus 160 early
   pre-token protocols below the $50M floor), each with an implied value in USD
-  and six concrete farm steps with cost and time.
-- `data.js` — the same board in compact form for the dashboard.
+  and seven concrete farm steps, each with its gas cost and hands-on minutes.
+- `data.js` — the same board in compact form for the dashboard, plus the
+  costed plan, the net at $1K / $10K / $100K deposits under a 5% / 10% / 20%
+  drop in the launch value, and the three live tokens nearest each row by TVL.
 - `dashboard/` — a static page (no network, no framework): dark-blue
   editorial theme with a lime accent; hero with a log-log scatter of TVL
-  against implied value and the fitted size curve; a six-stat strip; top-5 cards; five tabs
+  against implied value and the fitted size curve, and one honest sentence
+  of backtest (leave-one-out and time-split median miss, model and flat);
+  a six-stat strip; top-5 cards; five tabs
   (pre-token board, live-token, set aside, model & calibration, method and
   backtest); sortable
   and filterable board with a sensitivity range bar, an airdrop slice per
   $1,000 and a FARM / THIN / SKIP verdict per row; a centred detail modal
   for every protocol with a TVL slider, the value breakdown, the
   sensitivity range, farm
-  economics and the farm plan; and the model with its sector offsets and
+  economics, the costed seven-step farm plan, the net by deposit and drop,
+  and the nearest traded peers; and the model with its sector offsets and
   the variant comparison.
 - `screenshots/` — three screenshots of the dashboard: the board, a protocol
   detail view, and a filtered view.
@@ -188,11 +193,36 @@ accounting and the split are stated in the dashboard's Model & calibration tab.
 
 ## Farm plans
 
-Each row's six steps are derived from the protocol's own record (category,
-chains, TVL, age): a fresh wallet, the category's main action with a capital
-tier ($50 / $100 / $150 / $250 by TVL), a weekly qualifying action, a hold of
-30–60 days, a check of the protocol's own points page before withdrawing, and
-a farm log. Every step states what it costs and how long it takes.
+Each row's seven steps are derived from the protocol's own record (category,
+chains, TVL, age): Fund (a fresh wallet, $3 of gas, 5 minutes), Verify (check
+the farm is live on the protocol's own site, no gas, 5 minutes), Mint (the
+category's main action with a capital tier of $50 / $100 / $150 / $250 by TVL,
+$8 of setup gas, $4 when the capital is under $150, 10 minutes), Upkeep (a
+weekly qualifying action, $2 of gas a week, 10 minutes a week), Risk (hold of
+30–60 days, watched each week alongside the weekly action — the capital stays
+in the position, no gas and no extra minutes), Claim (check the protocol's own
+points page and claim only from the link it publishes, no fee, 10 minutes),
+and Exit (a farm log, 5 minutes). Every step states what it costs and how
+long it takes, in words and in numbers: the detail modal shows them as a
+table with a totals row, and the totals are the farm economics' gas and
+hands-on time — $17–$25 of gas and 35 + 10 minutes per week of the hold,
+summed from the same steps, not a second accounting. The setup is 15 minutes
+split across Verify and Mint: 5 to check, 10 to place the position.
+
+The same view prices the net at bigger deposits and smaller launches: a
+table of the net at $1,000, $10,000 and $100,000 deposits under a 5%, 10%
+and 20% drop in the launch value. The slice scales linearly with the deposit,
+the forgone T-bill yield scales with it at the same 30-day convention as the
+$1,000 economics, and the gas is the plan's gas, which does not grow with
+the deposit. At $1,000 with no drop the net is the economics' own net
+exactly. A bigger deposit does not rescue a bad farm: the slice grows with
+the deposit, but so does the forgone yield.
+
+The detail modal also names the three live tokens nearest the row by TVL —
+same category first — with their market caps and mcap/TVL ratios, so the
+reader can see which live tokens price a protocol like this one. When the
+row's own category has fewer than three live tokens, the rest come from
+across categories, and the modal says so.
 
 ## Files
 
