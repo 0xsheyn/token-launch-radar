@@ -127,7 +127,7 @@ tbody tr[data-selected="true"]{background:var(--lime-soft)}
 .hist-strip .hist-n{font-family:var(--font-body);font-size:11px;fill:var(--muted)}
 .hist-strip .tick{font-family:var(--font-body);font-size:10px;fill:var(--muted)}
 .hist-count{flex:0 0 auto;white-space:nowrap;font-size:12px;color:var(--muted)}
-.hist-strip .hist-median{stroke:var(--ink);stroke-width:1.5;stroke-dasharray:4 3}
+.hist-strip .hist-median{stroke:var(--ink);stroke-width:1.5}
 .set-aside{display:grid;gap:var(--step-4);margin-top:var(--step-4)}
 .set-intro{max-width:75ch;color:var(--ink-soft)}
 .set-group{padding:var(--step-4) var(--step-5)}
