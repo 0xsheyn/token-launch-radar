@@ -268,7 +268,8 @@
         validLine,
         el('p', { class: 'note', text: 'Off-white is the snapshot\u2019s record. Lime is this radar\u2019s estimate. A protocol records no token when DefiLlama carries no CoinGecko id and no symbol for it; a protocol on the list may still have a token its record does not carry, so the radar says \u201crecords no token\u201d, never \u201chas none\u201d.' })
       ),
-      el('div', { class: 'hero-side' }, scatter(), histogram())
+      scatter(),
+      histogram()
     );
   }
 
