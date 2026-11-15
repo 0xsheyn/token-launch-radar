@@ -169,10 +169,8 @@
   var SET_ASIDE_TOTAL = (DATA.set_aside || []).reduce(function (a, g) { return a + g.count; }, 0);
   var VERDICTS = { FARM: 0, THIN: 0, SKIP: 0 };
   DATA.rows.forEach(function (r) { if (r.economics) VERDICTS[r.economics.verdict]++; });
-  var MIN_SLICE = Math.min.apply(null, DATA.rows.map(function (r) { return r.economics ? r.economics.slice_usd : Infinity; }));
-  var NET_HOURS = DATA.rows.map(function (r) { return r.economics ? r.economics.net_per_hour_usd : 0; });
-  var MIN_NET_H = Math.min.apply(null, NET_HOURS);
-  var MAX_NET_H = Math.max.apply(null, NET_HOURS);
+  var GAS_MIN = Math.min.apply(null, DATA.rows.map(function (r) { return r.economics ? r.economics.gas_usd : Infinity; }));
+  var GAS_MAX = Math.max.apply(null, DATA.rows.map(function (r) { return r.economics ? r.economics.gas_usd : 0; }));
   var MEDIAN_IMPLIED = (function () {
     var v = DATA.rows.map(function (r) { return r.implied_value_usd; }).sort(function (a, b) { return a - b; });
     return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
@@ -306,7 +304,7 @@
           el('em', { text: 'The market\u2019s own sector multiples price them at ' + fmtUsd(TOTAL_IMPLIED) + '.' })
         ),
         el('p', { text: 'Every protocol the feed tracks that records no token and is nobody else\u2019s product, priced from the ones that do: a dollar of TVL is worth a different multiple in each sector, so the model takes each sector\u2019s own median FDV/TVL from the snapshot\u2019s trading protocols, then ranks what is still to come.' }),
-        el('p', { class: 'note', text: 'Black is the snapshot\u2019s record. Lime is this radar\u2019s estimate. A protocol records no token when DefiLlama carries no CoinGecko id and no symbol for it; a protocol on the list may still have a token its record does not carry, so the radar says \u201crecords no token\u201d, never \u201chas none\u201d.' })
+        el('p', { class: 'note', text: 'Off-white is the snapshot\u2019s record. Lime is this radar\u2019s estimate. A protocol records no token when DefiLlama carries no CoinGecko id and no symbol for it; a protocol on the list may still have a token its record does not carry, so the radar says \u201crecords no token\u201d, never \u201chas none\u201d.' })
       ),
       scatter()
     );
@@ -323,32 +321,6 @@
       cell('WATCHLIST COVERED', DATA.watchlist_size + ' / ' + DATA.watchlist_size, 'the house floor, at least'),
       cell('TVL ON THE BOARD', fmtUsd(BOARD_TVL), fmtUsd(TOTAL_IMPLIED) + ' implied'),
       cell('SECTORS PRICED', String(SECTORS_PRICED), 'of ' + CATEGORY_COUNT + ' categories \u00b7 global ' + DATA.global_benchmark + 'x')
-    );
-  }
-
-  function formulaBox() {
-    var m = DATA.model;
-    return el('section', { class: 'panel formula-box' },
-      el('div', { class: 'formula' },
-        'implied = round( tvl_usd \u00d7 sector \u00d7 (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 \u00d7 ' + m.growth_weight + ') \u00d7 (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' \u00d7 ' + m.maturity_range + ') \u00d7 (1 + ' + m.chain_step + ' \u00d7 min(chains - 1, ' + m.chain_cap + ')) )'
-      ),
-      el('p', { class: 'formula-note', text: 'sector: the median FDV/TVL of the sector\u2019s live tokens, shrunk toward the global ' + DATA.global_benchmark + 'x with a prior weight of ' + m.prior_weight + '; fewer than three live tokens take the global benchmark, so one live token never prices a whole sector. growth: the 7-day TVL change, clamped ' + m.growth_floor + '% to +' + m.growth_cap + '%, at half weight. maturity: 0.6 at listing, rising to 1.0 over three years — age is in the price: a protocol that has run longer with no token earns a fuller multiple, and the hold follows it. chains: +0.04 per extra chain, at most four. No name is special-cased.' })
-    );
-  }
-
-  function verdictBoxes() {
-    return el('section', { class: 'verdict-boxes' },
-      el('div', { class: 'panel verdict-box' },
-        el('div', { class: 'verdict-box-label', text: 'FARM \u00b7 NET BEATS THE T-BILL' }),
-        el('div', { class: 'verdict-box-value farm', text: String(VERDICTS.FARM) }),
-        el('div', { class: 'verdict-box-sub', text: 'slice minus gas and 4% T-bill, over the hold' })
-      ),
-      el('div', { class: 'panel verdict-box' },
-        el('div', { class: 'verdict-box-label', text: 'THIN \u00b7 BEATS THE FEES ONLY' }),
-        el('div', { class: 'verdict-box-value thin', text: String(VERDICTS.THIN) }),
-        el('div', { class: 'verdict-box-sub', text: 'worth it only if the fees fall or the slice grows' })
-      ),
-      el('p', { class: 'verdict-honest', text: 'Every row on this board clears all costs: the smallest slice is ' + fmtMoney(MIN_SLICE) + ' against ' + fmtMoney(1.50 + 3.29) + ' of gas and forgone yield, so no row earns THIN or SKIP. The verdict still separates them: net per hour runs from ' + fmtSigned(MIN_NET_H) + '/h to ' + fmtSigned(MAX_NET_H) + '/h.' })
     );
   }
 
@@ -634,10 +606,11 @@
         el('p', { text: 'This is one snapshot, ' + DATA.as_of + '. The model is fitted and read on that same snapshot: there is no time split and no out-of-sample error to quote, and this page quotes none. Any figure that looked like a validation would be invented, so the honest statement is the absence of one — the implied values are the snapshot\u2019s own sector multiples applied to its own TVLs, not a backtest.' }),
         el('h3', { text: 'How the verdict is earned' }),
         el('p', { text: 'FARM: the slice beats gas and the forgone 4% T-bill yield — the net is positive after every cost. THIN: the slice beats the gas but not the forgone yield — worth it only if the fees fall or the slice grows. SKIP: the slice does not even beat the gas.' }),
+        el('p', { class: 'sub', text: 'On this board: ' + VERDICTS.FARM + ' FARM \u00b7 ' + VERDICTS.THIN + ' THIN \u00b7 ' + VERDICTS.SKIP + ' SKIP. The counts follow the gas above, not a quota: the top rows by implied value are often SKIP, because a $1,000 deposit is a thin slice of a very large TVL.' }),
         el('h3', { text: 'Farm economics, stated plainly' }),
         el('ul', { class: 'assumptions' },
           el('li', { text: 'Slice: 10% of the launch goes to depositors, pro rata on TVL — slice = 0.10 \u00d7 implied \u00d7 $1,000 / TVL, at a $1,000 deposit.' }),
-          el('li', { text: 'Gas: $1.50 for the plan\u2019s transactions.' }),
+          el('li', { text: 'Gas: the plan\u2019s whole gas over the hold — $3 for the first transaction, $8 to set the position up ($4 when the capital is under $150), $2 a week for the weekly action — ' + fmtMoney(GAS_MIN) + ' to ' + fmtMoney(GAS_MAX) + ' across the board, by capital and hold. Each row\u2019s own total is in its detail view.' }),
           el('li', { text: 'Forgone: the 4% T-bill yield on the $1,000 over the 30 days the plan holds it — $3.29.' }),
           el('li', { text: 'Hands-on: the plan\u2019s own step times added up — 5 minutes to set up the wallet, 15 to place the position, 10 minutes a week for the weekly action over the hold, 10 to check the rewards page, 5 to log it.' }),
           el('li', { text: 'Sensitivity: the implied value under a TVL shock of \u00b120% and a growth-multiplier shock of \u00b10.25, sector, maturity and chain held. A wide range means the launch value is fragile.' })
@@ -727,7 +700,9 @@
         el('div', null, el('div', { class: 'econ-label', text: 'HANDS-ON' }), el('b', { class: 'num', text: e.hands_on_hours.toFixed(2) + ' h' })),
         el('div', null, el('div', { class: 'econ-label', text: 'NET PER HOUR' }), el('b', { class: 'num ' + (e.net_per_hour_usd >= 0 ? 'pos' : 'neg'), text: fmtSigned(e.net_per_hour_usd) + '/h' }))
       ) : el('p', { class: 'sub', text: 'No farm economics for this row.' }),
-      el('p', { class: 'sub', text: 'Slice: 10% of the launch to depositors, pro rata on TVL. Gas: $1.50. Forgone: the 4% T-bill yield on the $1,000 over 30 days. Hands-on: the plan\u2019s own step times.' })
+      el('p', { class: 'sub', text: e
+        ? 'Slice: 10% of the launch to depositors, pro rata on TVL. Gas: this row\u2019s whole plan gas over the hold — ' + e.gas_detail + ' = ' + fmtMoney(e.gas_usd) + ' total. Forgone: the 4% T-bill yield on the $1,000 over 30 days. Hands-on: the plan\u2019s own step times.'
+        : 'No farm economics for this row.' })
     );
 
     var ticket = el('section', { class: 'detail-section' },
@@ -771,8 +746,6 @@
     if (state.tab === 'board') {
       shell.appendChild(hero());
       shell.appendChild(statsStrip());
-      shell.appendChild(formulaBox());
-      shell.appendChild(verdictBoxes());
       shell.appendChild(topCards());
       shell.appendChild(tabBar());
       shell.appendChild(controls());

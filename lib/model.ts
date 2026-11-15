@@ -140,8 +140,10 @@ export interface FarmEconomics {
   deposit_usd: number;
   /** The launch slice a $1,000 deposit would get: 10% of the implied value, pro rata on TVL. */
   slice_usd: number;
-  /** The gas the plan is assumed to spend. */
+  /** The total gas the farm plan spends over the hold, summed from its own steps. */
   gas_usd: number;
+  /** The gas total broken down the way the plan states it: first tx + setup + weekly x weeks. */
+  gas_detail: string;
   /** The T-bill yield the deposit forgoes while it is held. */
   forgone_usd: number;
   /** Slice minus gas minus forgone. */
@@ -550,11 +552,20 @@ function holdDaysFor(age: number | null): number {
 // pay for itself if the launch ever comes, at the model's own implied value?
 // The slice is the deposit's share of the launch: 10% of the implied value
 // goes to depositors, pro rata on TVL, so slice = 0.10 x implied x 1000 / TVL.
-// The costs are stated, not hidden: $1.50 of gas for the plan's transactions,
-// and the 4% T-bill yield the $1,000 forgoes over the 30 days the plan holds
-// it ($3.29). Hands-on time is the plan's own step times added up: 5 minutes
-// to set up the wallet, 15 to place the position, 10 minutes a week for the
-// weekly action over the hold, 10 to check the rewards page, 5 to log it.
+// The costs are stated, not hidden. Gas is the plan's WHOLE gas over the
+// hold, summed from the gas the plan's own steps state — not a flat $1.50:
+//   step 1: "under $3 of gas for the first transaction" -> $3, the upper bound
+//   step 2: "about $8 of gas" to set the position up ($4 when the capital is
+//           under $150, the plan's own figure for the smaller ticket)
+//   step 3: "about $2 of gas a week" for the weekly action, times the weeks
+//           in the hold (ceil(hold / 7))
+//   steps 4-6: no gas — holding, checking and logging spend none.
+// That puts the total gas at $17-$25 across the board, by capital and hold.
+// The other cost is the 4% T-bill yield the $1,000 forgoes over the 30 days
+// the plan holds it ($3.29). Hands-on time is the plan's own step times
+// added up: 5 minutes to set up the wallet, 15 to place the position, 10
+// minutes a week for the weekly action over the hold, 10 to check the
+// rewards page, 5 to log it.
 //   net = slice - gas - forgone
 //   FARM when net > 0 (it beats every cost, forgone yield included)
 //   THIN when net <= 0 but slice - gas > 0 (it beats the fees only)
@@ -570,8 +581,11 @@ export const FARM_SLICE_SHARE = 0.1;
 /** The deposit the farm economics are priced at. */
 export const FARM_DEPOSIT_USD = 1000;
 
-/** The gas the farm plan is assumed to spend, in dollars. */
-export const FARM_GAS_USD = 1.5;
+/** The gas the first transaction costs: the plan says "under $3", and the accounting takes the $3 upper bound. */
+export const FARM_GAS_FIRST_TX_USD = 3;
+
+/** The gas the weekly action costs, per week. */
+export const FARM_GAS_WEEKLY_USD = 2;
 
 /** The T-bill rate the deposit forgoes while held. */
 export const FARM_TBILL_RATE = 0.04;
@@ -585,6 +599,20 @@ function round2(n: number): number {
 }
 
 /**
+ * The plan's whole gas over the hold, summed from the gas the plan's own steps state: $3 for the
+ * first transaction (the plan says "under $3"), $8 to set the position up ($4 when the capital is
+ * under $150), and $2 a week for the weekly action over the hold. Steps 4-6 spend no gas. The
+ * total is $17-$25 across the board, by capital and hold — and it is the gas the verdict is
+ * judged against, not a flat $1.50.
+ */
+export function planGasUsd(capital: number, hold: number): { total: number; setup: number; weeks: number; detail: string } {
+  const setup = capital >= 150 ? 8 : 4;
+  const weeks = Math.ceil(hold / 7);
+  const total = FARM_GAS_FIRST_TX_USD + setup + FARM_GAS_WEEKLY_USD * weeks;
+  return { total, setup, weeks, detail: `$${FARM_GAS_FIRST_TX_USD} first tx + $${setup} setup + $${FARM_GAS_WEEKLY_USD}/wk × ${weeks} wks` };
+}
+
+/**
  * One row's farm economics at a $1,000 deposit: the launch slice, the stated
  * costs, the net, the hands-on time from the plan's own step times, and the
  * verdict the net earns. Deterministic: the same row always gives the same
@@ -594,16 +622,17 @@ export function farmEconomics(implied: number, tvl: number, age: number | null):
   const capital = capitalFor({ tvl_usd: tvl } as SnapshotProtocol);
   const hold = holdDaysFor(age);
   const slice = tvl > 0 ? round2((FARM_SLICE_SHARE * implied * FARM_DEPOSIT_USD) / tvl) : 0;
-  const gas = FARM_GAS_USD;
+  const gas = planGasUsd(capital, hold);
   const forgone = round2((FARM_DEPOSIT_USD * FARM_TBILL_RATE * FARM_TBILL_DAYS) / 365);
-  const net = round2(slice - gas - forgone);
-  const minutes = 5 + 15 + 10 * Math.ceil(hold / 7) + 10 + 5;
+  const net = round2(slice - gas.total - forgone);
+  const minutes = 5 + 15 + 10 * gas.weeks + 10 + 5;
   const hours = round2(minutes / 60);
-  const verdict: FarmEconomics['verdict'] = net > 0 ? 'FARM' : slice - gas > 0 ? 'THIN' : 'SKIP';
+  const verdict: FarmEconomics['verdict'] = net > 0 ? 'FARM' : slice - gas.total > 0 ? 'THIN' : 'SKIP';
   return {
     deposit_usd: FARM_DEPOSIT_USD,
     slice_usd: slice,
-    gas_usd: gas,
+    gas_usd: gas.total,
+    gas_detail: gas.detail,
     forgone_usd: forgone,
     net_usd: net,
     capital_usd: capital,
