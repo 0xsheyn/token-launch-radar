@@ -69,11 +69,17 @@ a { color: var(--accent); }
 .controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--step-3); padding: var(--step-4) 0; border-top: 1px solid var(--border); }
 .field { display: grid; gap: var(--step-1); }
 .field label { color: var(--muted); font-size: 12px; }
-.field input, .field select {
+.field input[type="search"], .field select {
   min-height: 36px; padding: 0 var(--step-3); border: 1px solid var(--border); border-radius: var(--radius-control);
   background: var(--surface); min-width: 180px;
 }
-.field input { min-width: 260px; }
+.field input[type="search"] { min-width: 260px; }
+/* The watchlist checkbox is a control of its own size: the text-input sizing above
+   must never stretch it into a wide empty box detached from its label. */
+.field input[type="checkbox"] {
+  width: 16px; height: 16px; min-width: 0; min-height: 0; padding: 0;
+  flex: none; margin: 0; accent-color: var(--accent);
+}
 .field.check { align-content: end; padding-bottom: 8px; }
 .field.check label { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 13px; }
 .tabs { display: flex; gap: var(--step-1); padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
@@ -100,14 +106,40 @@ tbody tr[data-selected="true"] { background: var(--accent-soft); }
 .rank-badge { display: inline-block; min-width: 26px; text-align: center; padding: 2px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .rank-badge.top { background: var(--accent); color: var(--surface); }
 .rank-badge.top3 { background: #f3e9c8; color: var(--gold); }
-.bar { width: 120px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
-.bar i { display: block; height: 100%; background: var(--accent); }
+/* The table's implied-value bar: scoped under .implied so it never restyles an SVG rect
+   that happens to share the name. */
+.implied .bar { width: 120px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.implied .bar i { display: block; height: 100%; background: var(--accent); }
 .implied { display: flex; align-items: center; gap: var(--step-2); }
 .status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .status.live::before { background: var(--gold); }
 
 .model { margin-top: var(--step-4); padding: var(--step-5); display: grid; gap: var(--step-3); }
+
+/* Top-10 chart: a hand-built SVG, no library and no network. The panel sits between the
+   filters and the table; its bars are the board's own top ten by implied value. */
+.chart { margin-top: var(--step-4); padding: var(--step-5); display: grid; gap: var(--step-2); }
+.chart p { color: var(--muted); font-size: 13px; }
+.chart svg { display: block; width: 100%; height: auto; }
+.chart text { font-family: var(--font-body); font-size: 13px; fill: var(--ink); }
+.chart text.num { font-family: var(--font-num); font-size: 12px; fill: var(--muted); }
+.chart .chart-bar { fill: var(--accent); }
+.chart .chart-bar.first { fill: var(--ink); }
+.chart .track { fill: var(--border); opacity: 0.45; }
+
+/* When the detail drawer is open on a wide screen, the page shifts left by the drawer's
+   width so the drawer never covers the table: the header text stays whole instead of
+   being cut off mid-word. On narrow screens the drawer overlays, as before. */
+@media (min-width: 1100px) {
+  body.detail-open .shell { margin-right: 584px; }
+}
+/* Beside an open drawer the table is short of room, so it compacts: its decorative bars
+   hide (the value stays) and the cells tighten, and all seven columns fit. */
+@media (min-width: 1100px) and (max-width: 1650px) {
+  body.detail-open .implied .bar { display: none; }
+  body.detail-open th, body.detail-open td { padding-left: 8px; padding-right: 8px; }
+}
 .formula { font-family: var(--font-num); font-size: 13px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; background: var(--canvas); border-radius: var(--radius-control); padding: var(--step-3) var(--step-4); }
 .bench { width: 100%; font-size: 13px; }
 .bench th, .bench td { padding: 6px var(--step-3); }

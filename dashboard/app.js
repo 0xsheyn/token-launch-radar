@@ -1,7 +1,8 @@
 // Token Radar's dashboard, radar-2. It reads window.RADAR (written beside dashboard/ by
-// main.ts) and renders the ranked board, a filterable table, a per-protocol detail drawer with
-// the model's own inputs and the protocol's farm plan, and the sector benchmarks the model was
-// priced from. No network: every byte it shows is in data.js, and it fetches nothing.
+// main.ts) and renders the ranked board, a top-10 chart, a filterable table, a per-protocol
+// detail drawer with the model's own inputs, its launch-value sensitivity and the protocol's
+// farm plan, and the sector benchmarks the model was priced from. No network: every byte it
+// shows is in data.js, and it fetches nothing.
 (function () {
   'use strict';
 
@@ -243,6 +244,37 @@
     );
   }
 
+  // The top-10 chart: one inline SVG, built by hand from the board's own top ten by implied
+  // value. No library, no network. Names are escaped before they enter the markup.
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function topChart() {
+    var top = DATA.rows.slice(0, 10);
+    if (top.length === 0) return null;
+    var max = top[0].implied_value_usd || 1;
+    var barX = 262, barMax = 640, rowH = 34, padTop = 6;
+    var width = barX + barMax + 110;
+    var height = padTop + top.length * rowH;
+    var parts = ['<svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="Top 10 protocols by implied value">'];
+    top.forEach(function (r) {
+      var i = r.rank - 1;
+      var y = padTop + i * rowH;
+      var w = Math.max(4, Math.round((r.implied_value_usd / max) * barMax));
+      var name = r.name.length > 30 ? r.name.slice(0, 29) + '…' : r.name;
+      parts.push('<text x="0" y="' + (y + 16) + '">' + r.rank + '. ' + esc(name) + '</text>');
+      parts.push('<rect class="track" x="' + barX + '" y="' + (y + 6) + '" width="' + barMax + '" height="12" rx="6"/>');
+      parts.push('<rect class="chart-bar' + (r.rank === 1 ? ' first' : '') + '" x="' + barX + '" y="' + (y + 6) + '" width="' + w + '" height="12" rx="6"/>');
+      parts.push('<text class="num" x="' + (barX + w + 8) + '" y="' + (y + 16) + '">' + fmtUsd(r.implied_value_usd) + '</text>');
+    });
+    parts.push('</svg>');
+    return el('section', { class: 'panel chart' },
+      el('h2', { text: 'Top 10 by implied value' }),
+      el('p', { text: 'The strongest ten of the ' + DATA.board_size + ' pre-token protocols, by the same model that ranks the board.' }),
+      el('div', { html: parts.join('') })
+    );
+  }
+
   function sortHeader(key, label) {
     return el('th', { scope: 'col' },
       el('button', { type: 'button', onclick: function () { if (state.sort === key) state.dir = -state.dir; else { state.sort = key; state.dir = -1; } render(); } },
@@ -366,7 +398,9 @@
   }
 
   var dialog = el('dialog', { class: 'detail', id: 'detail', 'aria-labelledby': 'detail-title' });
-  dialog.addEventListener('close', function () { state.selected = null; writeHash(); });
+  // The drawer shifts the page left while it is open (see app.css: body.detail-open),
+  // so it never covers the table; the class comes off the moment the drawer closes.
+  dialog.addEventListener('close', function () { state.selected = null; document.body.classList.remove('detail-open'); writeHash(); });
 
   function openDetail(slug) {
     var row = DATA.rows.filter(function (r) { return r.slug === slug; })[0];
@@ -399,6 +433,26 @@
       ),
       el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(impliedOf(row, DATA.model)) + (impliedOf(row, DATA.model) === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price, and the protocol records no token: that is the snapshot\u2019s record, not proof it has none.' })
     ));
+    // Sensitivity: the implied value under a TVL shock of 20% either way and a growth-
+    // multiplier shock of 0.25 either way, sector, maturity and chain multipliers held.
+    // A wide range means the launch value is fragile; a narrow one means it barely moves.
+    // Guarded: a data.js written before sensitivity existed simply shows no section.
+    if (row.sensitivity) {
+      var s = row.sensitivity;
+      var low = Math.min(s.tvlShockUp, s.tvlShockDown, s.growthShockUp, s.growthShockDown);
+      var high = Math.max(s.tvlShockUp, s.tvlShockDown, s.growthShockUp, s.growthShockDown);
+      dialog.appendChild(el('section', { class: 'detail-section' },
+        el('h3', { text: 'Sensitivity' }),
+        el('div', { class: 'equation' },
+          el('div', null, el('span', { text: 'TVL 20% higher at launch' }), el('b', { class: 'num', text: fmtUsd(s.tvlShockUp) })),
+          el('div', null, el('span', { text: 'TVL 20% lower at launch' }), el('b', { class: 'num', text: fmtUsd(s.tvlShockDown) })),
+          el('div', null, el('span', { text: 'Growth multiplier 0.25 hotter' }), el('b', { class: 'num', text: fmtUsd(s.growthShockUp) })),
+          el('div', null, el('span', { text: 'Growth multiplier 0.25 colder' }), el('b', { class: 'num', text: fmtUsd(s.growthShockDown) })),
+          el('div', { class: 'total' }, el('span', { text: 'Range (low – high)' }), el('b', { class: 'num', text: fmtUsd(low) + ' – ' + fmtUsd(high) }))
+        ),
+        el('p', { class: 'sub', text: 'The four shocks spread ' + s.sensitivitySpreadPct.toFixed(2) + '% of the implied value. Carry the range, not a single number: a wide spread means the launch value leans hard on TVL and this week\u2019s growth.' })
+      ));
+    }
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan' }),
       el('ol', { class: 'steps' }, steps.map(function (s) {
@@ -413,6 +467,7 @@
     } else {
       dialog.setAttribute('open', '');
     }
+    document.body.classList.add('detail-open');
   }
 
   function render() {
@@ -421,6 +476,7 @@
     shell.appendChild(header());
     shell.appendChild(lede());
     shell.appendChild(controls());
+    if (state.tab === 'pre-token') shell.appendChild(topChart());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
     if (state.tab === 'pre-token') shell.appendChild(modelPanel());
     app.appendChild(shell);
