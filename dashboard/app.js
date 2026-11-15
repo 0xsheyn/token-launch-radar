@@ -7,7 +7,7 @@
   var DATA = window.RADAR;
   if (!DATA) return;
   var app = document.getElementById('board');
-  var state = { q: '', category: 'all', chain: 'all', verdict: 'all', move: 'all', pill: 'all', tab: 'board', sort: 'implied', dir: -1, selected: null };
+  var state = { q: '', category: 'all', chain: 'all', verdict: 'all', move: 'all', pill: 'all', ticket: 1000, tab: 'board', sort: 'implied', dir: -1, selected: null };
 
   function fmtUsd(n) {
     if (n === null || n === undefined || !isFinite(n)) return 'n/a';
@@ -109,7 +109,7 @@
     return DATA.rows.filter(function (r) {
       if (state.category !== 'all' && r.category !== state.category) return false;
       if (state.chain !== 'all' && (r.chains || []).indexOf(state.chain) < 0) return false;
-      if (state.verdict !== 'all' && (!r.economics || r.economics.verdict !== state.verdict)) return false;
+      if (state.verdict !== 'all' && (!r.economics || econAt(r.economics).verdict !== state.verdict)) return false;
       if (state.move === 'up' && !(r.change_7d !== null && r.change_7d > 0)) return false;
       if (state.move === 'down' && !(r.change_7d !== null && r.change_7d < 0)) return false;
       if (state.pill === 'watchlist' && !r.watchlist) return false;
@@ -126,8 +126,8 @@
       if (key === 'tvl') return r.tvl_usd;
       if (key === 'growth') return r.change_7d === null ? -Infinity : r.change_7d;
       if (key === 'age') return r.age_days === null ? Infinity : r.age_days;
-      if (key === 'slice') return r.economics ? r.economics.slice_usd : 0;
-      if (key === 'net') return r.economics ? r.economics.net_per_hour_usd : 0;
+      if (key === 'slice') return r.economics ? econAt(r.economics).slice_usd : 0;
+      if (key === 'net') return r.economics ? econAt(r.economics).net_per_hour_usd : 0;
       return r.implied_value_usd;
     }
     return list.slice().sort(function (a, b) {
@@ -307,11 +307,11 @@
   function controls() {
     var categories = Array.from(new Set(DATA.rows.map(function (r) { return r.category || 'Other'; }))).sort();
     var chains = Array.from(new Set(DATA.rows.reduce(function (acc, r) { return acc.concat(r.chains || []); }, []))).sort();
-    function makeSelect(id, label, options, current, wide) {
+    function makeSelect(id, label, options, current, wide, cls) {
       var opts = options.map(function (o) {
         return '<option value="' + esc(o[0]) + '"' + (o[0] === current ? ' selected="selected"' : '') + '>' + esc(o[1]) + '</option>';
       }).join('');
-      return '<div class="field' + (wide ? ' field-wide' : '') + '"><label for="' + id + '">' + label + '</label><select id="' + id + '" aria-label="' + label + '">' + opts + '</select></div>';
+      return '<div class="field' + (wide ? ' field-wide' : '') + (cls ? ' ' + cls : '') + '"><label for="' + id + '">' + label + '</label><select id="' + id + '" aria-label="' + label + '">' + opts + '</select></div>';
     }
     function pill(id, label) {
       return '<button type="button" class="pill' + (state.pill === id ? ' active' : '') + '" aria-pressed="' + (state.pill === id ? 'true' : 'false') + '" data-act="pill" data-pill="' + id + '">' + label + '</button>';
@@ -324,6 +324,8 @@
       makeSelect('chain', 'Chain', [['all', 'Every chain']].concat(chains.map(function (c) { return [c, c]; })), state.chain, false) +
       makeSelect('verdict', 'Verdict', [['all', 'Any verdict'], ['FARM', 'FARM'], ['THIN', 'THIN'], ['SKIP', 'SKIP']], state.verdict, false) +
       makeSelect('move', 'Move', [['all', 'Any move'], ['up', 'Up, 7 days'], ['down', 'Down, 7 days']], state.move, false) +
+      makeSelect('ticket', 'Ticket', [['1000', '$1K'], ['10000', '$10K'], ['100000', '$100K']], String(state.ticket), false, 'field-ticket') +
+      '<div class="field"><label>Export</label><button type="button" class="button csv-btn" data-act="csv">CSV</button></div>' +
       '<div class="field"><label>Show</label><div class="pills">' + pill('all', 'All') + pill('watchlist', 'Watchlist') + pill('early', 'Early') + '</div></div>' +
     '</div>';
   }
@@ -341,19 +343,18 @@
       }
     });
     var maxC = Math.max.apply(null, counts.concat([1]));
-    var W = 1200, H = 120, L = 8, R = 8, T = 8, B = 22;
+    var W = 1200, H = 36, L = 8, R = 8, T = 11, B = 11;
     var bw = (W - L - R) / counts.length;
-    var parts = ['<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Distribution of implied values, log scale">'];
+    var parts = ['<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Distribution of implied values, log scale, half a decade a bar">'];
     counts.forEach(function (c, idx) {
-      var h = Math.max(c > 0 ? 3 : 0, Math.round((c / maxC) * (H - T - B - 14)));
+      var h = Math.max(c > 0 ? 2 : 0, Math.round((c / maxC) * (H - T - B)));
       var x = L + idx * bw + 2;
       parts.push('<rect class="hist-bar" x="' + x.toFixed(1) + '" y="' + (H - B - h) + '" width="' + (bw - 4).toFixed(1) + '" height="' + h + '"/>');
-      if (c > 0) parts.push('<text class="hist-n" x="' + (x + (bw - 4) / 2).toFixed(1) + '" y="' + (H - B - h - 4) + '" text-anchor="middle">' + c + '</text>');
-      parts.push('<text class="tick" x="' + (x + (bw - 4) / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle">' + fmtUsd(edges[idx]) + '</text>');
+      if (c > 0) parts.push('<text class="hist-n" x="' + (x + (bw - 4) / 2).toFixed(1) + '" y="' + (H - B - h - 3) + '" text-anchor="middle">' + c + '</text>');
+      parts.push('<text class="tick" x="' + (x + (bw - 4) / 2).toFixed(1) + '" y="' + (H - 2) + '" text-anchor="middle">' + fmtUsd(edges[idx]) + '</text>');
     });
     parts.push('</svg>');
-    return '<section class="panel hist"><h2>How the board\u2019s implied values are distributed</h2><div>' + parts.join('') + '</div>' +
-      '<p class="hist-note">Log scale, half a decade a bar; the middle of the board is ' + fmtUsd(MEDIAN_IMPLIED) + '. The long tail is the small early rows. Each row\u2019s table bar shows its own sensitivity range \u2014 the model\u2019s leave-one-out error, P10\u2013P90 \u2014 on a log scale from the smallest low to the largest high. Slice: what $1,000 deposited would get if 10% of the launch goes to depositors pro rata. Net: that slice minus the plan\u2019s gas and the forgone 4% T-bill yield, per plan and per hands-on hour.</p></section>';
+    return '<section class="panel hist-strip" title="Log scale, half a decade a bar"><div class="hist-strip-label"><b>Implied values</b> <span>\u00b7 median ' + fmtUsd(MEDIAN_IMPLIED) + '</span></div><div class="hist-strip-svg">' + parts.join('') + '</div></section>';
   }
 
   function sortHeader(key, label) {
@@ -391,6 +392,7 @@
     }
     var body = list.map(function (r) {
       var e = r.economics;
+      var ea = econAt(e);
       var growth = r.change_7d === null ? 'n/a' : fmtPct(r.change_7d);
       var growthClass = r.change_7d === null ? '' : r.change_7d >= 0 ? 'pos' : 'neg';
       var chains = r.chains || [];
@@ -403,8 +405,8 @@
         '<td class="num ' + growthClass + '">' + growth + '</td>' +
         '<td class="num">' + fmtAge(r.age_days) + '</td>' +
         '<td>' + rangeBar(r) + '</td>' +
-        '<td class="num">' + (e ? fmtMoney(e.slice_usd) : 'n/a') + '</td>' +
-        '<td>' + (e ? '<div class="verdict-cell">' + verdictTag(e.verdict) + '<div class="net-h ' + (e.net_per_hour_usd >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(e.net_per_hour_usd) + '/h</div></div>' : '<span>n/a</span>') + '</td>' +
+        '<td class="num">' + (ea ? fmtMoney(ea.slice_usd) : 'n/a') + '</td>' +
+        '<td>' + (ea ? '<div class="verdict-cell">' + verdictTag(ea.verdict) + '<div class="net-h ' + (ea.net_per_hour_usd >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(ea.net_per_hour_usd) + '/h</div></div>' : '<span>n/a</span>') + '</td>' +
         '<td class="num">' + (e ? fmtMoney(e.gas_usd) + ' \u00b7 ' + e.hold_days + 'd' : 'n/a') + '</td>' +
       '</tr>';
     }).join('');
@@ -412,7 +414,7 @@
       sortHeader('implied', '#') + sortHeader('name', 'Protocol') +
       '<th>Mechanism</th>' +
       sortHeader('tvl', 'TVL') + sortHeader('growth', '7-day') + sortHeader('age', 'No token for') +
-      sortHeader('implied', 'Implied value') + sortHeader('slice', 'Airdrop / $1K') + sortHeader('net', 'Verdict') +
+      sortHeader('implied', 'Implied value') + sortHeader('slice', 'Airdrop / ' + ticketLabel()) + sortHeader('net', 'Verdict') +
       '<th>Fees \u00b7 Hold</th>' +
       '</tr></thead><tbody>' + body + '</tbody></table></div>' +
       '<div class="table-meta"><span class="count">' + list.length + ' of ' + DATA.board_size + ' shown \u00b7 click a column to sort, a row for its detail</span></div></div></div>';
@@ -621,8 +623,8 @@
       '<div class="panel dstat"><div class="stat-label">IMPLIED VALUE</div><div class="stat-value">' + fmtUsd(row.implied_value_usd) + '</div><div class="stat-sub">P25 to P90 ' + fmtUsd(s.p25) + ' to ' + fmtUsd(s.p90) + '</div></div>' +
       '<div class="panel dstat"><div class="stat-label">TVL</div><div class="stat-value">' + fmtUsd(row.tvl_usd) + '</div><div class="stat-sub">' + (row.change_7d === null ? '7d n/a' : '7d ' + fmtPct(row.change_7d)) + '</div></div>' +
       '<div class="panel dstat"><div class="stat-label">NO TOKEN FOR</div><div class="stat-value">' + fmtAge(row.age_days) + '</div><div class="stat-sub">tracked since ' + esc(row.listed_at || '\u2014') + '</div></div>' +
-      '<div class="panel dstat"><div class="stat-label">NET OF ALL COSTS</div><div class="stat-value">' + (e ? fmtMoney(e.slice_usd) : 'n/a') + '</div><div class="stat-sub">at 10% to depositors</div>' +
-        (e ? '<div class="stat-net ' + (e.net_usd >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(e.net_usd) + '</div><div class="stat-sub">' + esc(e.verdict) + ' | ' + fmtMoney(e.gas_usd) + ' fees + ' + fmtMoney(e.forgone_usd) + ' T-bill</div>' : '') +
+      '<div class="panel dstat"><div class="stat-label">NET OF ALL COSTS</div><div class="stat-value ' + (e ? (e.net_usd >= 0 ? 'pos' : 'neg') : '') + '">' + (e ? fmtSigned(e.net_usd) : 'n/a') + '</div><div class="stat-sub">slice ' + (e ? fmtMoney(e.slice_usd) : 'n/a') + ' at 10% to depositors</div>' +
+        (e ? '<div class="stat-sub">' + esc(e.verdict) + ' | ' + fmtMoney(e.gas_usd) + ' fees + ' + fmtMoney(e.forgone_usd) + ' T-bill</div>' : '') +
       '</div></section>';
 
     
@@ -655,11 +657,11 @@
     
     var steps = row.plan || [];
     var planBody = steps.map(function (st, i) {
-      return '<tr><td class="num">' + (i + 1) + '</td><td class="plan-step"><b>' + esc(st.label) + '. </b>' + esc(st.text || '') + '</td><td class="num">' + ((st.cost_usd || 0) === 0 ? 'none' : fmtMoney(st.cost_usd)) + '</td><td class="num">' + ((st.minutes || 0) > 0 ? (st.minutes + 'm') : '\u2014') + '</td></tr>';
+      return '<tr><td class="num">' + (i + 1) + '</td><td class="plan-step"><b>' + esc(st.label) + '. </b>' + esc(st.text || '') + '</td><td class="num">' + ((st.cost_usd || 0) === 0 ? 'none' : fmtMoney(st.cost_usd)) + '</td><td class="num">' + ((st.minutes || 0) > 0 ? (st.minutes + 'm') : esc(st.time || '\u2014')) + '</td></tr>';
     }).join('');
     var plan = '<section class="panel dpanel"><h2>Farm plan \u00b7 ' + esc(row.category || 'Other') + ' on ' + esc(chain0) + ' \u00b7 $' + capital + ' for ' + hold + ' days</h2>' +
       '<div class="table-wrap"><table class="detail-table plan-table"><thead><tr><th>#</th><th>Step</th><th>Cost</th><th>Time</th></tr></thead><tbody>' + planBody + '</tbody></table></div>' +
-      (e ? '<p class="plan-foot">Slice ' + fmtMoney(e.slice_usd) + ' \u00b7 Fees \u2212' + fmtMoney(e.gas_usd) + ' \u00b7 T-bill forgone \u2212' + fmtMoney(e.forgone_usd) + ' \u00b7 Net <b class="' + (e.net_usd >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(e.net_usd) + '</b> \u00b7 Work ' + e.hands_on_hours.toFixed(2) + 'h \u00b7 Per hour <b class="' + (e.net_per_hour_usd >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(e.net_per_hour_usd) + '/h</b></p>'
+      (e ? '<p class="plan-foot">Slice ' + fmtMoney(e.slice_usd) + ' \u00b7 Fees \u2212' + fmtMoney(e.gas_usd) + ' \u00b7 T-bill forgone \u2212' + fmtMoney(e.forgone_usd) + ' \u00b7 Net\u00a0<b class="' + (e.net_usd >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(e.net_usd) + '</b> \u00b7 Work ' + e.hands_on_hours.toFixed(2) + 'h \u00b7 Per hour\u00a0<b class="' + (e.net_per_hour_usd >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(e.net_per_hour_usd) + '/h</b></p>'
         : '<p class="plan-foot">No farm economics for this row.</p>') +
     '</section>';
 
@@ -693,7 +695,7 @@
     if (state.selected && !row) { state.selected = null; writeHash(); }
     var body;
     if (row) body = tabBar() + detailPage(row);
-    else if (state.tab === 'board') body = hero() + statsStrip() + tabBar() + controls() + boardTable() + histogram();
+    else if (state.tab === 'board') body = hero() + statsStrip() + tabBar() + controls() + histogram() + boardTable();
     else if (state.tab === 'live') body = tabBar() + liveTable();
     else if (state.tab === 'setaside') body = tabBar() + setAsideTab();
     else if (state.tab === 'backtest') body = tabBar() + backtestTab();
@@ -719,6 +721,7 @@
     else if (act === 'pill') { state.pill = t.getAttribute('data-pill'); writeHash(); render(); }
     else if (act === 'back') { goBackToBoard(); }
     else if (act === 'clear') { state.q = ''; state.category = 'all'; state.chain = 'all'; state.verdict = 'all'; state.move = 'all'; state.pill = 'all'; writeHash(); render(); }
+    else if (act === 'csv') { downloadCsv(); }
   });
   app.addEventListener('input', function (e) {
     if (e.target.id === 'q') {
@@ -732,7 +735,7 @@
     }
   });
   app.addEventListener('change', function (e) {
-    if (['category', 'chain', 'verdict', 'move'].indexOf(e.target.id) < 0) return;
+    if (['category', 'chain', 'verdict', 'move', 'ticket'].indexOf(e.target.id) < 0) return;
     state[e.target.id] = e.target.value;
     writeHash();
     render();
@@ -746,6 +749,37 @@
 
   readHash();
   render();
+  function ticketLabel() { var t = +state.ticket; return t === 100000 ? '$100K' : t === 10000 ? '$10K' : '$1K'; }
+  function econAt(e) {
+    if (!e) return null;
+    var k = state.ticket / 1000;
+    var slice = e.slice_usd * k;
+    var forgone = e.forgone_usd * k;
+    var net = slice - e.gas_usd - forgone;
+    return { slice_usd: slice, gas_usd: e.gas_usd, forgone_usd: forgone, net_usd: net, net_per_hour_usd: net / e.hands_on_hours, verdict: net > 0 ? 'FARM' : (slice - e.gas_usd > 0 ? 'THIN' : 'SKIP'), hold_days: e.hold_days, hands_on_hours: e.hands_on_hours };
+  }
+  function csvCell(v) {
+    var s = String(v === null || v === undefined ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function downloadCsv() {
+    var list = sortedRows(rows());
+    var head = ['rank', 'protocol', 'category', 'tvl_usd', 'change_7d_pct', 'age_days', 'implied_value_usd', 'implied_p10_usd', 'implied_p90_usd', 'airdrop_usd', 'verdict', 'net_per_hour_usd', 'gas_usd', 'hold_days'];
+    var lines = [head.join(',')];
+    list.forEach(function (r) {
+      var ea = econAt(r.economics);
+      var s = r.sensitivity || {};
+      lines.push([r.rank, r.name, r.category || 'Other', r.tvl_usd, r.change_7d === null ? '' : r.change_7d, r.age_days === null ? '' : r.age_days, r.implied_value_usd, s.p10 || '', s.p90 || '', ea ? ea.slice_usd.toFixed(2) : '', ea ? ea.verdict : '', ea ? ea.net_per_hour_usd.toFixed(2) : '', r.economics ? r.economics.gas_usd : '', r.economics ? r.economics.hold_days : ''].map(csvCell).join(','));
+    });
+    var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'token-launch-radar.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  }
   window.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && state.selected) goBackToBoard();
   });

@@ -258,7 +258,8 @@ vendor/makefun-board.ts  make.fun's dossier library, copied unchanged
 dashboard/index.html     the page shell
 dashboard/app.css        the theme (light, lime + sky-blue accents, no network)
 dashboard/app.js         hero, scatter, stats, verdicts, tabs, filters,
-                         board, histogram, detail page, offsets, backtest
+                         board, histogram strip, CSV export, ticket picker,
+                         detail page, offsets, backtest
 screenshots/              1-board.png, 2-detail.png, 3-filtered.png
 LICENSE                  MIT
 README.md                this file
