@@ -88,6 +88,15 @@ a { color: var(--accent); }
 .count { margin-left: auto; color: var(--muted); font-size: 13px; align-self: center; }
 
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel); overflow: hidden; }
+/* The live-token note is an explainer banner above the table, never a caption
+   inside it: tinted, with an accent edge, so it reads as a note about the table,
+   not a row of it. */
+.live-note {
+  margin: 0 0 var(--step-4); padding: var(--step-3) var(--step-4);
+  background: var(--accent-soft); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: var(--radius-control); font-size: 13px;
+}
+.live-note b { font-weight: 650; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { padding: var(--step-3) var(--step-3); border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }

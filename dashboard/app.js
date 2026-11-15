@@ -356,14 +356,20 @@
         el('td', null, el('span', { class: 'status live', text: 'already trades' }))
       ));
     });
-    return el('div', { class: 'panel' },
+    return el('div', null,
+      // The live-token note is an explainer banner ABOVE the table, never a
+      // caption inside it: a caption reads as a row of the table it describes.
+      el('p', { class: 'live-note' },
+        el('b', { text: 'Token live: ' }),
+        'these protocols already trade, so their market cap is a fact, not a model. They are set aside from the pre-token ranking, and their FDV/TVL ratios price the sector benchmarks below.'),
+      el('div', { class: 'panel' },
       el('div', { class: 'table-wrap' },
         el('table', null,
-          el('caption', { class: 'sub', text: 'Token live: these protocols already trade, so their market cap is a fact, not a model. They are set aside from the pre-token ranking, and their FDV/TVL ratios price the sector benchmarks below.' }),
           el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Status' }), el('th', { scope: 'col', text: 'Protocol' }), el('th', { scope: 'col', text: 'TVL' }), el('th', { scope: 'col', text: '7d' }), el('th', { scope: 'col', text: 'Market cap' }), el('th', { scope: 'col', text: 'Token' }))),
           tbody
         )
       )
+    )
     );
   }
 
