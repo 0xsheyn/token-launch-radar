@@ -134,6 +134,32 @@ export interface BoardRow {
   farm_steps: string[];
 }
 
+/** One row's farm economics at a $1,000 deposit: what the launch would pay, what it costs, and the verdict. */
+export interface FarmEconomics {
+  /** The deposit the economics are priced at. */
+  deposit_usd: number;
+  /** The launch slice a $1,000 deposit would get: 10% of the implied value, pro rata on TVL. */
+  slice_usd: number;
+  /** The gas the plan is assumed to spend. */
+  gas_usd: number;
+  /** The T-bill yield the deposit forgoes while it is held. */
+  forgone_usd: number;
+  /** Slice minus gas minus forgone. */
+  net_usd: number;
+  /** The capital the farm plan itself asks for. */
+  capital_usd: number;
+  /** The hold the farm plan itself asks for, in days. */
+  hold_days: number;
+  /** Hands-on minutes the plan's own step times add up to. */
+  hands_on_minutes: number;
+  /** Hands-on hours, from the minutes. */
+  hands_on_hours: number;
+  /** Net per hands-on hour. */
+  net_per_hour_usd: number;
+  /** FARM when the net beats every cost, THIN when the slice covers gas but not the forgone yield, SKIP when it does not cover gas. */
+  verdict: 'FARM' | 'THIN' | 'SKIP';
+}
+
 /** The dashboard's compact view of one row, with farm plans generated in the page. */
 export interface RadarRow {
   rank: number;
@@ -148,6 +174,7 @@ export interface RadarRow {
   age_days: number | null;
   implied_value_usd: number;
   sensitivity: LaunchSensitivity;
+  economics: FarmEconomics;
   sector_multiple: number;
   growth_multiplier: number;
   maturity_multiplier: number;
@@ -166,6 +193,22 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
+/** One set-aside protocol: enough to list it with its reason. */
+export interface SetAsideMember {
+  slug: string;
+  name: string;
+  category: string | null;
+  tvl_usd: number;
+}
+
+/** One reason a group of protocols is set aside from the board. */
+export interface SetAsideGroup {
+  reason: string;
+  detail: string;
+  count: number;
+  members: SetAsideMember[];
+}
+
 /** Everything the dashboard needs: the board, the live set, and the model it runs. */
 export interface RadarData {
   as_of: string;
@@ -177,6 +220,8 @@ export interface RadarData {
   board_size: number;
   early_size: number;
   live_size: number;
+  record_no_token: number;
+  set_aside: SetAsideGroup[];
   benchmarks: SectorBenchmark[];
   global_benchmark: number;
   rows: RadarRow[];
@@ -499,6 +544,77 @@ function holdDaysFor(age: number | null): number {
   return 30;
 }
 
+// ---------------------------------------------------------------------------
+// Farm economics
+// The verdict answers one question: does a $1,000 deposit into this protocol
+// pay for itself if the launch ever comes, at the model's own implied value?
+// The slice is the deposit's share of the launch: 10% of the implied value
+// goes to depositors, pro rata on TVL, so slice = 0.10 x implied x 1000 / TVL.
+// The costs are stated, not hidden: $1.50 of gas for the plan's transactions,
+// and the 4% T-bill yield the $1,000 forgoes over the 30 days the plan holds
+// it ($3.29). Hands-on time is the plan's own step times added up: 5 minutes
+// to set up the wallet, 15 to place the position, 10 minutes a week for the
+// weekly action over the hold, 10 to check the rewards page, 5 to log it.
+//   net = slice - gas - forgone
+//   FARM when net > 0 (it beats every cost, forgone yield included)
+//   THIN when net <= 0 but slice - gas > 0 (it beats the fees only)
+//   SKIP when slice - gas <= 0 (it does not even beat the fees)
+// Nothing here changes the ranking: the economics are priced from the same
+// implied value the board already carries, so the table, the modal and the
+// verdict counts all read one number.
+// ---------------------------------------------------------------------------
+
+/** The share of a launch the model assumes goes to depositors. */
+export const FARM_SLICE_SHARE = 0.1;
+
+/** The deposit the farm economics are priced at. */
+export const FARM_DEPOSIT_USD = 1000;
+
+/** The gas the farm plan is assumed to spend, in dollars. */
+export const FARM_GAS_USD = 1.5;
+
+/** The T-bill rate the deposit forgoes while held. */
+export const FARM_TBILL_RATE = 0.04;
+
+/** The days of T-bill yield the deposit forgoes. */
+export const FARM_TBILL_DAYS = 30;
+
+/** A dollar figure to two decimals. */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * One row's farm economics at a $1,000 deposit: the launch slice, the stated
+ * costs, the net, the hands-on time from the plan's own step times, and the
+ * verdict the net earns. Deterministic: the same row always gives the same
+ * economics.
+ */
+export function farmEconomics(implied: number, tvl: number, age: number | null): FarmEconomics {
+  const capital = capitalFor({ tvl_usd: tvl } as SnapshotProtocol);
+  const hold = holdDaysFor(age);
+  const slice = tvl > 0 ? round2((FARM_SLICE_SHARE * implied * FARM_DEPOSIT_USD) / tvl) : 0;
+  const gas = FARM_GAS_USD;
+  const forgone = round2((FARM_DEPOSIT_USD * FARM_TBILL_RATE * FARM_TBILL_DAYS) / 365);
+  const net = round2(slice - gas - forgone);
+  const minutes = 5 + 15 + 10 * Math.ceil(hold / 7) + 10 + 5;
+  const hours = round2(minutes / 60);
+  const verdict: FarmEconomics['verdict'] = net > 0 ? 'FARM' : slice - gas > 0 ? 'THIN' : 'SKIP';
+  return {
+    deposit_usd: FARM_DEPOSIT_USD,
+    slice_usd: slice,
+    gas_usd: gas,
+    forgone_usd: forgone,
+    net_usd: net,
+    capital_usd: capital,
+    hold_days: hold,
+    hands_on_minutes: minutes,
+    hands_on_hours: hours,
+    net_per_hour_usd: hours > 0 ? round2(net / hours) : 0,
+    verdict,
+  };
+}
+
 /** The category's main action, in the words a farmer can follow. */
 function actionFor(p: SnapshotProtocol, capital: number, chain: string): string {
   const c = (p.category ?? '').toLowerCase();
@@ -586,6 +702,50 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   ];
 }
 
+/**
+ * The protocols the board sets aside, grouped by the reason they are not on
+ * it: every protocol in the snapshot that is neither a board row nor one of
+ * the 24 live tokens the live tab shows. The groups are read off the
+ * snapshot's own fields only — a name ending in a release number is
+ * DefiLlama's marker for a versioned pool, a category of CEX is an exchange,
+ * and the early cutoff is the 160 early rows the board carries. Nothing is
+ * inferred about a protocol the snapshot does not describe.
+ */
+export function setAsideGroups(snapshot: Snapshot, board: BoardRow[], live: LiveRow[]): SetAsideGroup[] {
+  const boardSlugs = new Set(board.map((r) => r.slug));
+  const liveSlugs = new Set(live.map((r) => r.slug));
+  const order: [string, string][] = [
+    ['Above the floor, not on the watchlist', 'Pre-token and above the $50M floor, but the watchlist — the floor of this board — does not name them. The board ranks the watchlist plus the 160 early rows below it.'],
+    ['Below the early cutoff', 'Pre-token and below the floor, ranked past the 160 early rows this board carries, largest TVL first.'],
+    ['Versioned pools', 'The name ends in a release number, DefiLlama\u2019s marker for a pool of another protocol — a version of something that already exists, not a protocol of its own.'],
+    ['Live tokens, beyond the 24 shown', 'Already trading. The live tab shows the 24 largest by market cap; the rest are set aside with them.'],
+    ['Exchanges', 'A centralised exchange is not a launch to farm: the board ranks protocols, not venues, whether or not the exchange has a token.'],
+  ];
+  const members = new Map<string, SnapshotProtocol[]>();
+  for (const [reason] of order) members.set(reason, []);
+  for (const p of snapshot.protocols) {
+    if (boardSlugs.has(p.slug) || liveSlugs.has(p.slug)) continue;
+    let reason: string;
+    if (p.category === 'CEX') reason = 'Exchanges';
+    else if (isPreToken(p) && VERSIONED.test(p.name)) reason = 'Versioned pools';
+    else if (isPreToken(p) && p.tvl_usd >= snapshot.floor_usd) reason = 'Above the floor, not on the watchlist';
+    else if (isPreToken(p)) reason = 'Below the early cutoff';
+    else reason = 'Live tokens, beyond the 24 shown';
+    members.get(reason)!.push(p);
+  }
+  return order
+    .map(([reason, detail]) => {
+      const list = (members.get(reason) ?? []).sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+      return {
+        reason,
+        detail,
+        count: list.length,
+        members: list.map((p) => ({ slug: p.slug, name: p.name, category: p.category, tvl_usd: p.tvl_usd })),
+      };
+    })
+    .filter((g) => g.count > 0);
+}
+
 /** The live-token protocols, by market cap, for the dashboard's Live token view. */
 export function liveRows(snapshot: Snapshot): LiveRow[] {
   return snapshot.protocols
@@ -618,6 +778,7 @@ export function radarRow(row: BoardRow): RadarRow {
     age_days: row.age_days,
     implied_value_usd: row.implied_value_usd,
     sensitivity: row.sensitivity,
+    economics: farmEconomics(row.implied_value_usd, row.tvl_usd, row.age_days),
     sector_multiple: row.model.sector_multiple,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
@@ -642,6 +803,8 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     board_size: board.length,
     early_size: early,
     live_size: live.length,
+    record_no_token: snapshot.protocols.filter(isPreToken).length,
+    set_aside: setAsideGroups(snapshot, board, live),
     benchmarks: benchmarks.byCategory,
     global_benchmark: benchmarks.global,
     rows: board.map((r) => ({ ...radarRow(r), watchlist: snapshot.watchlist.includes(r.slug) })),
